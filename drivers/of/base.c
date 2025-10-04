@@ -434,6 +434,32 @@ bool of_machine_compatible_match(const char *const *compats)
 }
 EXPORT_SYMBOL(of_machine_compatible_match);
 
+/**
+ * of_machine_get_match_data - Test root of device tree against a compatible array
+ * and return data associated with match.
+ * @matches: array of of_device_id match structures to search in
+ *
+ * Returns match data if the root node has any of the given compatible values in its or NULL if
+ * compatible property nodes not match with compats.
+ */
+const void *of_machine_get_match_data(const struct of_device_id *matches)
+{
+	const struct of_device_id *match = NULL;
+	struct device_node *root;
+
+	root = of_find_node_by_path("/");
+	if (root) {
+		match = of_match_node(matches, root);
+		of_node_put(root);
+	}
+
+	if (!match)
+		return NULL;
+
+	return match->data;
+}
+EXPORT_SYMBOL(of_machine_get_match_data);
+
 static bool __of_device_is_status(const struct device_node *device,
 				  const char * const*strings)
 {
