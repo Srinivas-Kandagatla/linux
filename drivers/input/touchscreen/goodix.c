@@ -517,7 +517,7 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
 
 static void goodix_ts_irq_poll_timer(struct timer_list *t)
 {
-	struct goodix_ts_data *ts = from_timer(ts, t, timer);
+	struct goodix_ts_data *ts = timer_container_of(ts, t, timer);
 
 	schedule_work(&ts->work_i2c_poll);
 	mod_timer(&ts->timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
@@ -547,7 +547,7 @@ static void goodix_disable_irq(struct goodix_ts_data *ts)
 	if (ts->client->irq) {
 		disable_irq(ts->client->irq);
 	} else {
-		del_timer(&ts->timer);
+		timer_delete(&ts->timer);
 		cancel_work_sync(&ts->work_i2c_poll);
 	}
 }
@@ -557,7 +557,7 @@ static void goodix_free_irq(struct goodix_ts_data *ts)
 	if (ts->client->irq) {
 		devm_free_irq(&ts->client->dev, ts->client->irq, ts);
 	} else {
-		del_timer(&ts->timer);
+		timer_delete(&ts->timer);
 		cancel_work_sync(&ts->work_i2c_poll);
 	}
 }
@@ -1464,7 +1464,7 @@ static void goodix_ts_remove(struct i2c_client *client)
 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
 
 	if (!client->irq) {
-		del_timer(&ts->timer);
+		timer_delete(&ts->timer);
 		cancel_work_sync(&ts->work_i2c_poll);
 	}
 
