@@ -10,6 +10,8 @@
 #include <linux/slab.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
+#include <sound/jack.h>
+#include <sound/soc-jack.h>
 #include <sound/pcm_params.h>
 #include "q6dsp-lpass-ports.h"
 #include "q6dsp-common.h"
@@ -18,9 +20,16 @@
 
 #define AUDIOREACH_BE_PCM_BASE	16
 
+struct q6apm_jack_dai_data {
+	struct snd_soc_jack *jack;
+	struct notifier_block nb;
+	bool is_plugged;
+};
+
 struct q6apm_lpass_dai_data {
 	struct q6apm_graph *graph[APM_PORT_MAX];
 	bool is_port_started[APM_PORT_MAX];
+	struct q6apm_jack_dai_data jack_data[APM_PORT_MAX];
 	struct audioreach_module_config module_config[APM_PORT_MAX];
 };
 
@@ -159,6 +168,14 @@ static void q6apm_lpass_dai_shutdown(struct snd_pcm_substream *substream, struct
 	}
 }
 
+static bool q6apm_lpass_dai_jack_plugged(struct q6apm_jack_dai_data *data)
+{
+	if (data->jack)
+	       return data->is_plugged;
+
+	return true;
+}
+
 static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct q6apm_lpass_dai_data *dai_data = dev_get_drvdata(dai->dev);
@@ -166,6 +183,9 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 	struct q6apm_graph *graph;
 	int graph_id = dai->id;
 	int rc;
+
+	if (!q6apm_lpass_dai_jack_plugged(&dai_data->jack_data[dai->id]))
+		return 0;
 
 	if (dai_data->is_port_started[dai->id]) {
 		q6apm_graph_stop(dai_data->graph[dai->id]);
@@ -273,11 +293,45 @@ static const struct snd_soc_dai_ops q6hdmi_ops = {
 	.set_fmt	= q6i2s_set_fmt,
 };
 
+static int jack_event(struct notifier_block *nb, unsigned long event,
+			  void *data)
+{
+	struct q6apm_jack_dai_data *jack_data = container_of(nb, struct q6apm_jack_dai_data, nb);
+
+	jack_data->is_plugged = false;
+
+	if (event & SND_JACK_AVOUT)
+		jack_data->is_plugged = true;
+
+	return 0;
+}
+
+static int q6dsp_audio_port_set_jack(struct snd_soc_component *component,
+			       struct snd_soc_jack *jack,
+			       void *data)
+{
+	struct q6apm_lpass_dai_data *dai_data = snd_soc_component_get_drvdata(component);
+
+	if (data) {
+		struct snd_soc_dai *dai = data;
+		struct q6apm_jack_dai_data *jack_data;
+
+		jack_data = &dai_data->jack_data[dai->id];
+		jack_data->jack = jack;
+		jack_data->nb.notifier_call = &jack_event;
+		if (jack)
+			snd_soc_jack_notifier_register(jack, &jack_data->nb);
+	}
+
+	return 0;
+}
+
 static const struct snd_soc_component_driver q6apm_lpass_dai_component = {
 	.name = "q6apm-be-dai-component",
 	.of_xlate_dai_name = q6dsp_audio_ports_of_xlate_dai_name,
 	.be_pcm_base = AUDIOREACH_BE_PCM_BASE,
 	.use_dai_pcm_id = true,
+	.set_jack = q6dsp_audio_port_set_jack,
 };
 
 static int q6apm_lpass_dai_dev_probe(struct platform_device *pdev)
