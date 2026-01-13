@@ -253,6 +253,7 @@ int qcom_snd_dp_jack_setup(struct snd_soc_pcm_runtime *rtd,
 			   struct snd_soc_jack *dp_jack, int dp_pcm_id)
 {
 	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct snd_soc_card *card = rtd->card;
 	char jack_name[NAME_SIZE];
 	int rval, i;
@@ -261,6 +262,14 @@ int qcom_snd_dp_jack_setup(struct snd_soc_pcm_runtime *rtd,
 	rval = snd_soc_card_jack_new(card, jack_name, SND_JACK_AVOUT, dp_jack);
 	if (rval)
 		return rval;
+
+	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
+		rval = snd_soc_component_set_jack(cpu_dai->component, dp_jack, cpu_dai);
+		if (rval != 0 && rval != -ENOTSUPP) {
+			dev_warn(card->dev, "Failed to set jack: %d\n", rval);
+			return rval;
+		}
+	}
 
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
 		rval = snd_soc_component_set_jack(codec_dai->component, dp_jack, NULL);
