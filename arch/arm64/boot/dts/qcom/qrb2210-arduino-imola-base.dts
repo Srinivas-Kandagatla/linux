@@ -110,7 +110,7 @@
 		leds = <&ledr>, <&ledg>, <&ledb>;
 	};
 
-	sound {
+	sound: sound {
 		compatible = "qcom,qrb2210-sndcard";
 		model = "Arduino-Imola-HPH-LOUT";
 		audio-routing =	"IN1_HPHL", "HPHL_OUT",
@@ -289,19 +289,6 @@
 				};
 			};
 		};
-
-		ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			port@0 {
-				reg = <0>;
-				anx_dsi0_in: endpoint {
-					remote-endpoint = <&mdss_dsi0_out>;
-					data-lanes = <0 1 2 3>;
-				};
-			};
-		};
 	};
 };
 
@@ -313,11 +300,6 @@
 	vdda-supply = <&pm4125_l5>;
 
 	status = "okay";
-};
-
-&mdss_dsi0_out {
-	remote-endpoint = <&anx_dsi0_in>;
-	data-lanes = <0 1 2 3>;
 };
 
 &mdss_dsi0_phy {
