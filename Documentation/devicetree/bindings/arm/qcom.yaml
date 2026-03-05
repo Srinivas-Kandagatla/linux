@@ -888,6 +888,7 @@ properties:
 
       - items:
           - enum:
+              - arduino,monza
               - qcom,monaco-evk
               - qcom,qcs8300-ride
           - const: qcom,qcs8300
