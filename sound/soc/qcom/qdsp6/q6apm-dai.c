@@ -538,6 +538,9 @@ static void q6apm_dai_pcm_destruct(struct snd_soc_component *component, struct s
 	else
 		substream = pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream;
 
+	if (!substream)
+		return;
+
 	soc_prtd = snd_soc_substream_to_rtd(substream);
 	cpu_dai = snd_soc_rtd_to_cpu(soc_prtd, 0);
 
