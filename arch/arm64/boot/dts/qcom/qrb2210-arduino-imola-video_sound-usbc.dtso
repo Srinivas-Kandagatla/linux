@@ -30,13 +30,6 @@
 };
 
 &sound {
-	mm4-dai-link {
-		link-name = "MultiMedia4";
-
-		cpu {
-			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA4>;
-		};
-	};
 
 	hdmi-i2s-dai-link {
 		link-name = "HDMI/I2S Playback";

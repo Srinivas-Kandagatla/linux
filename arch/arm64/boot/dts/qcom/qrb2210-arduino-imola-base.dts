@@ -141,6 +141,14 @@
 			};
 		};
 
+		mm4-dai-link {
+			link-name = "MultiMedia4";
+
+			cpu {
+				sound-dai = <&q6asmdai  MSM_FRONTEND_DAI_MULTIMEDIA4>;
+			};
+		};
+
 		hph-playback-dai-link {
 			link-name = "HPH Playback";
 			cpu {
