@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2018, Linaro Limited.
 // Copyright (c) 2018, The Linux Foundation. All rights reserved.
@@ -35,10 +36,8 @@ static int qcom_snd_setup_dai_links(struct snd_soc_card *card, struct snd_soc_da
 	int ret;
 
 	dlc = devm_kcalloc(dev, 2, sizeof(*dlc), GFP_KERNEL);
-	if (!dlc) {
-		ret = -ENOMEM;
-		goto err_put_np;
-	}
+	if (!dlc)
+		return -ENOMEM;
 	link->cpus	= &dlc[0];
 	link->platforms	= &dlc[1];
 
@@ -48,7 +47,7 @@ static int qcom_snd_setup_dai_links(struct snd_soc_card *card, struct snd_soc_da
 	ret = of_property_read_string(np, "link-name", &link->name);
 	if (ret) {
 		dev_err(card->dev, "error getting codec dai_link name\n");
-		goto err_put_np;
+		return ret;
 	}
 
 	cpu = of_get_child_by_name(np, "cpu");
@@ -115,8 +114,6 @@ err:
 	of_node_put(cpu);
 	of_node_put(codec);
 	of_node_put(platform);
-err_put_np:
-	of_node_put(np);
 
 	return ret;
 }
@@ -185,8 +182,10 @@ int qcom_snd_parse_of(struct snd_soc_card *card)
 		}
 
 		ret = qcom_snd_setup_dai_links(card, link, np);
-		if (ret)
+		if (ret) {
+			of_node_put(np);
 			return ret;
+		}
 
 		link++;
 	}
@@ -198,8 +197,10 @@ int qcom_snd_parse_of(struct snd_soc_card *card)
 			continue;
 
 		ret = qcom_snd_setup_dai_links(card, link, np);
-		if (ret)
+		if (ret) {
+			of_node_put(np);
 			return ret;
+		}
 
 		link++;
 	}
