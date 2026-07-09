@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ *
+ * Device tree overlay for the IQaudio Codec Zero connected to the
+ * Arduino Monza 40-pin JHAT connector.
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
+
+&i2c0 {
+	clock-frequency = <400000>;
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	da7213: audio-codec@1a {
+		compatible = "dlg,da7213";
+		reg = <0x1a>;
+		VDDA-supply = <&vdc_3v3>;
+		VDDIO-supply = <&vdc_3v3>;
+		#sound-dai-cells = <0>;
+	};
+};
+
+&lpass_tlmm {
+	lpi_i2s1_active: lpi-i2s1-active-state {
+		clk-pins {
+			pins = "gpio6";
+			function = "i2s1_clk";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		ws-pins {
+			pins = "gpio7";
+			function = "i2s1_ws";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		data-pins {
+			pins = "gpio8", "gpio9";
+			function = "i2s1_data";
+			drive-strength = <8>;
+			bias-disable;
+		};
+	};
+};
+
+&sound {
+	pinctrl-0 = <&quad_mi2s_active>, <&quad_mclk_active>, <&lpi_i2s4_active>,
+		    <&lpi_i2s1_active>;
+
+	i2s1-playback-dai-link {
+		link-name = "JHAT Analog Playback";
+
+		codec {
+			sound-dai = <&da7213>;
+		};
+
+		cpu {
+			sound-dai = <&q6apmbedai LPI_MI2S_RX_1>;
+		};
+
+		platform {
+			sound-dai = <&q6apm>;
+		};
+	};
+
+	i2s1-capture-dai-link {
+		link-name = "JHAT Analog Capture";
+
+		codec {
+			sound-dai = <&da7213>;
+		};
+
+		cpu {
+			sound-dai = <&q6apmbedai LPI_MI2S_TX_1>;
+		};
+
+		platform {
+			sound-dai = <&q6apm>;
+		};
+	};
+};
