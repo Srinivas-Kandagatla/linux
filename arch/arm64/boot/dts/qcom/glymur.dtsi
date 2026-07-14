@@ -14,12 +14,12 @@
 #include <dt-bindings/clock/qcom,kaanapali-gxclkctl.h>
 #include <dt-bindings/clock/qcom,rpmh.h>
 #include <dt-bindings/dma/qcom-gpi.h>
-#include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,glymur-rpmh.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/mailbox/qcom-ipcc.h>
+#include <dt-bindings/media/qcom,glymur-iris.h>
 #include <dt-bindings/phy/phy-qcom-qmp.h>
 #include <dt-bindings/power/qcom,rpmhpd.h>
 #include <dt-bindings/power/qcom-rpmpd.h>
@@ -46,7 +46,6 @@
 			compatible = "qcom,oryon-2-2";
 			reg = <0x0 0x0>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1024>;
 			power-domains = <&cpu_pd0>, <&scmi_perf 0>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_0>;
@@ -64,7 +63,6 @@
 			compatible = "qcom,oryon-2-2";
 			reg = <0x0 0x100>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1024>;
 			power-domains = <&cpu_pd1>, <&scmi_perf 0>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_0>;
@@ -76,7 +74,6 @@
 			compatible = "qcom,oryon-2-2";
 			reg = <0x0 0x200>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1024>;
 			power-domains = <&cpu_pd2>, <&scmi_perf 0>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_0>;
@@ -88,7 +85,6 @@
 			compatible = "qcom,oryon-2-2";
 			reg = <0x0 0x300>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1024>;
 			power-domains = <&cpu_pd3>, <&scmi_perf 0>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_0>;
@@ -100,7 +96,6 @@
 			compatible = "qcom,oryon-2-2";
 			reg = <0x0 0x400>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1024>;
 			power-domains = <&cpu_pd4>, <&scmi_perf 0>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_0>;
@@ -112,7 +107,6 @@
 			compatible = "qcom,oryon-2-2";
 			reg = <0x0 0x500>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1024>;
 			power-domains = <&cpu_pd5>, <&scmi_perf 0>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_0>;
@@ -124,7 +118,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x10000>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd6>, <&scmi_perf 1>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_1>;
@@ -142,7 +135,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x10100>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd7>, <&scmi_perf 1>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_1>;
@@ -154,7 +146,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x10200>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd8>, <&scmi_perf 1>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_1>;
@@ -166,7 +157,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x10300>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd9>, <&scmi_perf 1>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_1>;
@@ -178,7 +168,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x10400>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd10>, <&scmi_perf 1>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_1>;
@@ -190,7 +179,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x10500>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd11>, <&scmi_perf 1>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_1>;
@@ -202,7 +190,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x20000>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd12>, <&scmi_perf 2>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_2>;
@@ -220,7 +207,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x20100>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd13>, <&scmi_perf 2>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_2>;
@@ -232,7 +218,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x20200>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd14>, <&scmi_perf 2>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_2>;
@@ -244,7 +229,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x20300>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd15>, <&scmi_perf 2>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_2>;
@@ -256,7 +240,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x20400>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd16>, <&scmi_perf 2>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_2>;
@@ -268,7 +251,6 @@
 			compatible = "qcom,oryon-2-1";
 			reg = <0x0 0x20500>;
 			enable-method = "psci";
-			capacity-dmips-mhz = <1372>;
 			power-domains = <&cpu_pd17>, <&scmi_perf 2>;
 			power-domain-names = "psci", "perf";
 			next-level-cache = <&l2_2>;
@@ -688,14 +670,6 @@
 			hwlocks = <&tcsr_mutex 3>;
 			no-map;
 		};
-
-		adsp_rpc_remote_heap_mem: adsp-rpc-remote-heap {
-			compatible = "shared-dma-pool";
-			alloc-ranges = <0x0 0x80000000 0x0 0x80000000>;
-			reusable;
-			alignment = <0x0 0x400000>;
-			size = <0x0 0x800000>;
-		};
 	};
 
 	smp2p-adsp {
@@ -803,7 +777,7 @@
 				 <0>,				/* USB 2 Phy PIPEGMUX */
 				 <0>,				/* USB 2 Phy SYS PCIE PIPEGMUX */
 				 <0>,				/* PCIe 3a */
-				 <&pcie3b_phy>,			/* PCIe 3b */
+				 <0>,				/* PCIe 3b */
 				 <&pcie4_phy>,			/* PCIe 4 */
 				 <&pcie5_phy>,			/* PCIe 5 */
 				 <&pcie6_phy>,			/* PCIe 6 */
@@ -819,8 +793,8 @@
 				 <&usb_0_qmpphy QMP_USB43DP_USB3_PIPE_CLK>,
 				 <&usb_1_qmpphy QMP_USB43DP_USB3_PIPE_CLK>,
 				 <&usb_2_qmpphy QMP_USB43DP_USB3_PIPE_CLK>,
-				 <&usb_mp_qmpphy0>,		/* USB3 UNI PHY pipe 0 */
-				 <&usb_mp_qmpphy1>,		/* USB3 UNI PHY pipe 1 */
+				 <&usb_mp_qmpphy0 QMP_USB43DP_USB3_PIPE_CLK>,
+				 <&usb_mp_qmpphy1 QMP_USB43DP_USB3_PIPE_CLK>,
 				 <0>,				/* USB4 PHY 0 pcie pipe */
 				 <0>,				/* USB4 PHY 0 Max pipe */
 				 <0>,				/* USB4 PHY 1 pcie pipe */
@@ -830,6 +804,7 @@
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 			#power-domain-cells = <1>;
+			power-domains = <&rpmhpd RPMHPD_CX>;
 		};
 
 		gpi_dma2: dma-controller@800000 {
@@ -1909,7 +1884,7 @@
 			spi0: spi@b80000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b80000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 92 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1052 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S0_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -1936,7 +1911,7 @@
 			i2c1: i2c@b84000 {
 				compatible = "qcom,geni-i2c";
 				reg = <0x0 0x00b84000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 93 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1053 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S1_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -1963,7 +1938,7 @@
 			spi1: spi@b84000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b84000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 93 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1053 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S1_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -1990,7 +1965,7 @@
 			i2c2: i2c@b88000 {
 				compatible = "qcom,geni-i2c";
 				reg = <0x0 0x00b88000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 94 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1054 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S2_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2017,7 +1992,7 @@
 			spi2: spi@b88000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b88000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 94 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1054 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S2_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2044,7 +2019,7 @@
 			uart2: serial@b88000 {
 				compatible = "qcom,geni-uart";
 				reg = <0x0 0x00b88000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 94 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1054 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S2_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2089,7 +2064,7 @@
 			spi3: spi@b8c000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b8c000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 95 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1055 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S3_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2143,7 +2118,7 @@
 			spi4: spi@b90000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b90000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 96 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1056 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S4_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2197,7 +2172,7 @@
 			spi5: spi@b94000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b94000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 97 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1057 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S5_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2224,7 +2199,7 @@
 			i2c6: i2c@b98000 {
 				compatible = "qcom,geni-i2c";
 				reg = <0x0 0x00b98000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 98 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1058 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S6_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2251,7 +2226,7 @@
 			spi6: spi@b98000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b98000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 98 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1058 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S6_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2278,7 +2253,7 @@
 			i2c7: i2c@b9c000 {
 				compatible = "qcom,geni-i2c";
 				reg = <0x0 0x00b9c000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 99 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1059 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S7_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2305,7 +2280,7 @@
 			spi7: spi@b9c000 {
 				compatible = "qcom,geni-spi";
 				reg = <0x0 0x00b9c000 0x0 0x4000>;
-				interrupts = <GIC_ESPI 99 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 1059 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&gcc GCC_QUPV3_WRAP0_S7_CLK>;
 				clock-names = "se";
 				interconnects = <&clk_virt MASTER_QUP_CORE_0 QCOM_ICC_TAG_ALWAYS
@@ -2327,6 +2302,59 @@
 				#size-cells = <0>;
 
 				status = "disabled";
+			};
+		};
+
+		remoteproc_soccp: remoteproc-soccp@d00000 {
+			compatible = "qcom,glymur-soccp-pas", "qcom,kaanapali-soccp-pas";
+			reg = <0x0 0x00d00000 0x0 0x200000>;
+
+			interrupts-extended = <&intc GIC_SPI 167 IRQ_TYPE_EDGE_RISING>,
+					      <&soccp_smp2p_in 0 IRQ_TYPE_EDGE_RISING>,
+					      <&soccp_smp2p_in 1 IRQ_TYPE_EDGE_RISING>,
+					      <&soccp_smp2p_in 2 IRQ_TYPE_EDGE_RISING>,
+					      <&soccp_smp2p_in 3 IRQ_TYPE_EDGE_RISING>,
+					      <&soccp_smp2p_in 9 IRQ_TYPE_EDGE_RISING>,
+					      <&soccp_smp2p_in 10 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "wdog",
+					  "fatal",
+					  "ready",
+					  "handover",
+					  "stop-ack",
+					  "pong",
+					  "wake-ack";
+
+			clocks = <&rpmhcc RPMH_CXO_CLK>;
+			clock-names = "xo";
+
+			power-domains = <&rpmhpd RPMHPD_CX>,
+					<&rpmhpd RPMHPD_MX>;
+			power-domain-names = "cx",
+					     "mx";
+
+			memory-region = <&soccp_mem>,
+					<&soccpdtb_mem>;
+
+			qcom,smem-states = <&soccp_smp2p_out 0>,
+					   <&soccp_smp2p_out 10>,
+					   <&soccp_smp2p_out 9>,
+					   <&soccp_smp2p_out 8>;
+			qcom,smem-state-names = "stop",
+						"wakeup",
+						"sleep",
+						"ping";
+
+			status = "disabled";
+
+			glink-edge {
+				interrupts-extended = <&ipcc GLYMUR_MPROC_SOCCP
+							     IPCC_MPROC_SIGNAL_GLINK_QMP
+							     IRQ_TYPE_EDGE_RISING>;
+				mboxes = <&ipcc GLYMUR_MPROC_SOCCP
+						IPCC_MPROC_SIGNAL_GLINK_QMP>;
+				qcom,remote-pid = <19>;
+				label = "soccp";
+
 			};
 		};
 
@@ -3692,47 +3720,10 @@
 				reg = <0x0 0x0 0x0 0x0 0x0>;
 				bus-range = <0x01 0xff>;
 
-				phys = <&pcie3b_phy>;
-
 				#address-cells = <3>;
 				#size-cells = <2>;
 				ranges;
 			};
-		};
-
-		pcie3b_phy: phy@f10000 {
-			compatible = "qcom,glymur-qmp-gen5x4-pcie-phy";
-			reg = <0x0 0x00f10000 0x0 0x10000>;
-
-			clocks = <&gcc GCC_PCIE_PHY_3B_AUX_CLK>,
-				 <&gcc GCC_PCIE_3B_CFG_AHB_CLK>,
-				 <&tcsr TCSR_PCIE_3_CLKREF_EN>,
-				 <&gcc GCC_PCIE_3B_PHY_RCHNG_CLK>,
-				 <&gcc GCC_PCIE_3B_PIPE_CLK>,
-				 <&gcc GCC_PCIE_3B_PIPE_DIV2_CLK>;
-			clock-names = "aux",
-				      "cfg_ahb",
-				      "ref",
-				      "rchng",
-				      "pipe",
-				      "pipediv2";
-
-			resets = <&gcc GCC_PCIE_3B_PHY_BCR>,
-				 <&gcc GCC_PCIE_3B_NOCSR_COM_PHY_BCR>;
-			reset-names = "phy",
-				      "phy_nocsr";
-
-			assigned-clocks = <&gcc GCC_PCIE_3B_PHY_RCHNG_CLK>;
-			assigned-clock-rates = <100000000>;
-
-			power-domains = <&gcc GCC_PCIE_3B_PHY_GDSC>;
-
-			#clock-cells = <0>;
-			clock-output-names = "pcie3b_pipe_clk";
-
-			#phy-cells = <0>;
-
-			status = "disabled";
 		};
 
 		cryptobam: dma-controller@1dc4000 {
@@ -4099,9 +4090,6 @@
 					compatible = "qcom,glymur-fastrpc", "qcom,kaanapali-fastrpc";
 					qcom,glink-channels = "fastrpcglink-apps-dsp";
 					label = "adsp";
-					memory-region = <&adsp_rpc_remote_heap_mem>;
-					qcom,vmids = <QCOM_SCM_VMID_LPASS
-						      QCOM_SCM_VMID_ADSP_HEAP>;
 					#address-cells = <1>;
 					#size-cells = <0>;
 
@@ -4735,6 +4723,57 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 			reg = <0x0 0x07e40000 0x0 0xe080>;
 			qcom,bcm-voters = <&apps_bcm_voter>;
 			#interconnect-cells = <2>;
+		};
+
+		sdhc_2: mmc@8804000 {
+			compatible = "qcom,glymur-sdhci", "qcom,sdhci-msm-v5";
+
+			reg = <0x0 0x08804000 0x0 0x1000>;
+
+			interrupts = <GIC_SPI 207 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 223 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "hc_irq",
+					  "pwr_irq";
+
+			clocks = <&gcc GCC_SDCC2_AHB_CLK>,
+				 <&gcc GCC_SDCC2_APPS_CLK>,
+				 <&rpmhcc RPMH_CXO_CLK>;
+			clock-names = "iface",
+				      "core",
+				      "xo";
+
+			iommus = <&apps_smmu 0xd00 0>;
+			qcom,dll-config = <0x0007442c>;
+			qcom,ddr-config = <0x80040868>;
+
+			power-domains = <&rpmhpd RPMHPD_CX>;
+			operating-points-v2 = <&sdhc2_opp_table>;
+
+			interconnects = <&aggre3_noc MASTER_SDCC_2 QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+					<&hsc_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_SDCC_2 QCOM_ICC_TAG_ACTIVE_ONLY>;
+			interconnect-names = "sdhc-ddr",
+					     "cpu-sdhc";
+
+			bus-width = <4>;
+			dma-coherent;
+
+			status = "disabled";
+
+			sdhc2_opp_table: opp-table {
+				compatible = "operating-points-v2";
+
+				opp-100000000 {
+					opp-hz = /bits/ 64 <100000000>;
+					required-opps = <&rpmhpd_opp_low_svs>;
+				};
+
+				opp-202000000 {
+					opp-hz = /bits/ 64 <202000000>;
+					required-opps = <&rpmhpd_opp_svs_l1>;
+				};
+			};
 		};
 
 		usb_2_hsphy: phy@88e0000  {
@@ -5614,6 +5653,123 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 			};
 		};
 
+		iris: video-codec@aa00000 {
+			compatible = "qcom,glymur-iris";
+			reg = <0x0 0xaa00000 0x0 0xf0000>;
+
+			clocks = <&gcc GCC_VIDEO_AXI0C_CLK>,
+				 <&videocc VIDEO_CC_MVS0C_CLK>,
+				 <&videocc VIDEO_CC_MVS0_CLK>,
+				 <&gcc GCC_VIDEO_AXI0_CLK>,
+				 <&videocc VIDEO_CC_MVS0C_FREERUN_CLK>,
+				 <&videocc VIDEO_CC_MVS0_FREERUN_CLK>,
+				 <&gcc GCC_VIDEO_AXI1_CLK>,
+				 <&videocc VIDEO_CC_MVS1_CLK>,
+				 <&videocc VIDEO_CC_MVS1_FREERUN_CLK>;
+			clock-names = "core_iface",
+				      "core",
+				      "vcodec0_core",
+				      "vcodec0_iface",
+				      "core_freerun",
+				      "vcodec0_core_freerun",
+				      "vcodec1_iface",
+				      "vcodec1_core",
+				      "vcodec1_core_freerun";
+
+			dma-coherent;
+
+			interconnects = <&hsc_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+					 &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
+					<&mmss_noc MASTER_VIDEO QCOM_ICC_TAG_ALWAYS
+					 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
+			interconnect-names = "cpu-cfg",
+					     "video-mem";
+
+			interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
+
+			iommus = <&apps_smmu 0x1940 0x0>,
+				 <&apps_smmu 0x1943 0x0>,
+				 <&apps_smmu 0x1944 0x0>,
+				 <&apps_smmu 0x19e0 0x0>;
+
+			iommu-map = <IOMMU_FID_IRIS_FIRMWARE &apps_smmu 0x19e2 0x1>;
+
+			memory-region = <&video_mem>;
+
+			operating-points-v2 = <&iris_opp_table>;
+
+			power-domains = <&videocc VIDEO_CC_MVS0C_GDSC>,
+					<&videocc VIDEO_CC_MVS0_GDSC>,
+					<&rpmhpd RPMHPD_MXC>,
+					<&rpmhpd RPMHPD_MMCX>,
+					<&videocc VIDEO_CC_MVS1_GDSC>;
+			power-domain-names = "venus",
+					     "vcodec0",
+					     "mxc",
+					     "mmcx",
+					     "vcodec1";
+
+			resets = <&gcc GCC_VIDEO_AXI0C_CLK_ARES>,
+				 <&gcc GCC_VIDEO_AXI0_CLK_ARES>,
+				 <&videocc VIDEO_CC_MVS0C_FREERUN_CLK_ARES>,
+				 <&videocc VIDEO_CC_MVS0_FREERUN_CLK_ARES>,
+				 <&gcc GCC_VIDEO_AXI1_CLK_ARES>,
+				 <&videocc VIDEO_CC_MVS1_FREERUN_CLK_ARES>;
+			reset-names = "core_bus",
+				      "vcodec0_bus",
+				      "core",
+				      "vcodec0_core",
+				      "vcodec1_bus",
+				      "vcodec1_core";
+
+			/*
+			 * IRIS firmware is signed by vendors, only
+			 * enable on boards where the proper signed firmware
+			 * is available.
+			 */
+			status = "disabled";
+
+			iris_opp_table: opp-table {
+				compatible = "operating-points-v2";
+
+				opp-240000000 {
+					opp-hz = /bits/ 64 <240000000 240000000 360000000>;
+					required-opps = <&rpmhpd_opp_svs>,
+							<&rpmhpd_opp_low_svs>;
+				};
+
+				opp-338000000 {
+					opp-hz = /bits/ 64 <338000000 338000000 507000000>;
+					required-opps = <&rpmhpd_opp_svs>,
+							<&rpmhpd_opp_svs>;
+				};
+
+				opp-366000000 {
+					opp-hz = /bits/ 64 <366000000 366000000 549000000>;
+					required-opps = <&rpmhpd_opp_svs_l1>,
+							<&rpmhpd_opp_svs_l1>;
+				};
+
+				opp-444000000 {
+					opp-hz = /bits/ 64 <444000000 444000000 666000000>;
+					required-opps = <&rpmhpd_opp_svs_l1>,
+							<&rpmhpd_opp_nom>;
+				};
+
+				opp-533333334 {
+					opp-hz = /bits/ 64 <533333334 533333334 800000000>;
+					required-opps = <&rpmhpd_opp_svs_l1>,
+							<&rpmhpd_opp_turbo>;
+				};
+
+				opp-655000000 {
+					opp-hz = /bits/ 64 <655000000 655000000 982000000>;
+					required-opps = <&rpmhpd_opp_nom>,
+							<&rpmhpd_opp_turbo_l1>;
+				};
+			};
+		};
+
 		videocc: clock-controller@aaf0000 {
 			compatible = "qcom,glymur-videocc";
 			reg = <0x0 0x0aaf0000 0x0 0x10000>;
@@ -5635,6 +5791,7 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 			reg = <0x0 0x0abf0000 0x0 0x10000>;
 			clocks = <&gcc GCC_EVA_AHB_CLK>,
 				 <&rpmhcc RPMH_CXO_CLK>,
+				 <&rpmhcc RPMH_CXO_CLK_A>,
 				 <&sleep_clk>;
 
 			power-domains = <&rpmhpd RPMHPD_MMCX>,
@@ -5872,7 +6029,7 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 				#size-cells = <0>;
 			};
 
-			spmi_bus2: spmi@c448000 {
+			spmi_bus2: spmi@c48000 {
 				reg = <0x0 0x0c448000 0x0 0x4000>,
 				      <0x0 0x0c8e0000 0x0 0x10000>,
 				      <0x0 0x0c44c000 0x0 0x8000>;
@@ -6557,6 +6714,46 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 					bias-disable;
 				};
 			};
+
+			sdc2_default_state: sdc2-default-state {
+				clk-pins {
+					pins = "sdc2_clk";
+					drive-strength = <16>;
+					bias-disable;
+				};
+
+				cmd-pins {
+					pins = "sdc2_cmd";
+					drive-strength = <10>;
+					bias-pull-up;
+				};
+
+				data-pins {
+					pins = "sdc2_data";
+					drive-strength = <10>;
+					bias-pull-up;
+				};
+			};
+
+			sdc2_sleep_state: sdc2-sleep-state {
+				clk-pins {
+					pins = "sdc2_clk";
+					drive-strength = <2>;
+					bias-disable;
+				};
+
+				cmd-pins {
+					pins = "sdc2_cmd";
+					drive-strength = <2>;
+					bias-pull-up;
+				};
+
+				data-pins {
+					pins = "sdc2_data";
+					drive-strength = <2>;
+					bias-pull-up;
+				};
+			};
 		};
 
 		stm: stm@10002000 {
@@ -6613,7 +6810,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_spdm";
 
 			qcom,cmb-element-bits = <32>;
 			qcom,cmb-msrs-num = <32>;
@@ -6678,7 +6874,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_gcc";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -6697,7 +6892,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_cdsp";
 
 			qcom,dsb-element-bits = <32>;
 			qcom,dsb-msrs-num = <32>;
@@ -6717,7 +6911,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_cdsp_dpm_1";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -6737,7 +6930,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_cdsp_dpm_2";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -6858,7 +7050,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "cti_cdsp";
 		};
 
 		cti_wpss: cti@111ab000 {
@@ -6867,7 +7058,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "cti_wpss";
 		};
 
 		tpdm@111d0000 {
@@ -6876,7 +7066,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_qm";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7052,7 +7241,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_mm_dsb";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7071,7 +7259,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_east_dsb";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7090,7 +7277,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_west_dsb";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7109,7 +7295,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_center_dsb";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7128,7 +7313,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_ipcc";
 
 			qcom,cmb-msrs-num = <32>;
 
@@ -7147,7 +7331,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_qrng";
 
 			qcom,cmb-msrs-num = <32>;
 
@@ -7166,7 +7349,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_pmu";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7185,7 +7367,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_rdpm_cx";
 
 			qcom,cmb-msrs-num = <32>;
 
@@ -7204,7 +7385,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_rdpm_mxc";
 
 			qcom,cmb-msrs-num = <32>;
 
@@ -7223,7 +7403,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_rdpm_mxa";
 
 			qcom,cmb-msrs-num = <32>;
 
@@ -7242,7 +7421,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_center_dsb_1";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7261,7 +7439,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_south2_dsb";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7280,7 +7457,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_south_dsb";
 
 			qcom,dsb-msrs-num = <32>;
 
@@ -7299,7 +7475,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_pcie_rscc";
 
 			qcom,cmb-element-bits = <32>;
 			qcom,cmb-msrs-num = <32>;
@@ -7343,7 +7518,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_swao_prio_4";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -7522,7 +7696,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_swao_prio_0";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -7542,7 +7715,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_swao_prio_1";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -7562,7 +7734,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_swao_prio_2";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -7582,7 +7753,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_swao_prio_3";
 
 			qcom,cmb-element-bits = <64>;
 			qcom,cmb-msrs-num = <32>;
@@ -7602,7 +7772,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 
 			clocks = <&aoss_qmp>;
 			clock-names = "apb_pclk";
-			label = "tpdm_swao";
 
 			qcom,dsb-element-bits = <32>;
 			qcom,dsb-msrs-num = <32>;
@@ -7613,22 +7782,6 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 						remote-endpoint = <&aoss_tpda_in5>;
 					};
 				};
-			};
-		};
-
-		sram@14680000 {
-			compatible = "qcom,glymur-imem", "mmio-sram";
-			reg = <0x0 0x14680000 0x0 0x2c000>;
-			ranges = <0 0 0x14680000 0x2c000>;
-
-			no-memory-wc;
-
-			#address-cells = <1>;
-			#size-cells = <1>;
-
-			pil-sram@94c {
-				compatible = "qcom,pil-reloc-info";
-				reg = <0x94c 0xc8>;
 			};
 		};
 
@@ -7761,9 +7914,9 @@ qcom,ports-lane-control =	/bits/ 8 <0xff 0x01 0x00 0x01 0xff 0x03 0x02 0xff 0xff
 		pcie_smmu: iommu@15480000 {
 			compatible = "arm,smmu-v3";
 			reg = <0x0 0x15480000 0x0 0x20000>;
-			interrupts = <GIC_ESPI 4 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_ESPI 2 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_ESPI 0 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 964 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 962 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 960 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "eventq", "cmdq-sync", "gerror";
 			dma-coherent;
 			#iommu-cells = <1>;
