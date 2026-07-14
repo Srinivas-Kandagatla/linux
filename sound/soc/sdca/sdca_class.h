@@ -31,6 +31,13 @@ struct sdca_function_data;
  *             and must leave @function->desc alone -- the framework owns the
  *             per-instance descriptor.  Return 0 on success or a negative
  *             errno if no matching template is known.  May be NULL.
+ * @pde_pre_pmu: called before DAPM writes REQUESTED_PS=PS0; use to
+ *             prepare device state that must be valid before the PDE
+ *             sequencer runs (e.g. IT_USAGE); may be NULL
+ * @pde_post_pmu: called after DAPM writes REQUESTED_PS=PS0 and before
+ *             ACTUAL_PS polling begins; use to commit pending register
+ *             writes (e.g. FUNCTION_ACTION) on devices that require an
+ *             explicit commit trigger for PDE power-up; may be NULL
  *
  * Codec-specific SoundWire drivers pass a pointer to this struct to
  * sdca_class_probe() from their sdw_driver.probe.  Codec-specific
@@ -42,6 +49,10 @@ struct sdca_class_hw_ops {
 	int  (*hw_init)(struct sdw_slave *slave);
 	int  (*populate_function)(struct sdw_slave *slave,
 				  struct sdca_function_data *function);
+	int  (*pde_pre_pmu)(struct sdw_slave *slave, struct regmap *regmap,
+			    unsigned int function_id, unsigned int entity_id);
+	int  (*pde_post_pmu)(struct sdw_slave *slave, struct regmap *regmap,
+			     unsigned int function_id, unsigned int entity_id);
 };
 
 struct sdca_class_drv {
