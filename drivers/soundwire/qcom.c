@@ -111,6 +111,8 @@
 #define SWRM_DPn_PORT_HCTRL_BANK(offset,  n, m)	(offset + 0x100 * (n - 1) + 0x40 * m)
 #define SWRM_DPn_BLOCK_CTRL3_BANK(offset, n, m)	(offset + 0x100 * (n - 1) + 0x40 * m)
 #define SWRM_DPn_SAMPLECTRL2_BANK(offset, n, m)	(offset + 0x100 * (n - 1) + 0x40 * m)
+#define SWRM_DP_PCM_PORT_CTRL(n)		(0x1054 + 0x100 * (n))
+#define SWRM_DP_PCM_PORT_CTRL_EN				0x03
 
 #define SWR_V1_3_MSTR_MAX_REG_ADDR				0x1740
 #define SWR_V2_0_MSTR_MAX_REG_ADDR				0x50ac
@@ -1117,6 +1119,21 @@ err:
 	return ret;
 }
 
+static bool qcom_swrm_port_is_pcm(struct sdw_bus *bus, unsigned int port_num)
+{
+	struct sdw_master_runtime *m_rt;
+	struct sdw_port_runtime *p_rt;
+
+	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
+			if (p_rt->num == port_num)
+				return m_rt->stream->type == SDW_STREAM_PCM;
+		}
+	}
+
+	return false;
+}
+
 static int qcom_swrm_port_enable(struct sdw_bus *bus,
 				 struct sdw_enable_ch *enable_ch,
 				 unsigned int bank)
@@ -1124,6 +1141,7 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 	u32 reg;
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
 	u32 val;
+	int ret;
 	u32 offset = ctrl->reg_layout[SWRM_OFFSET_DP_PORT_CTRL_BANK];
 
 	reg = SWRM_DPn_PORT_CTRL_BANK(offset, enable_ch->port_num, bank);
@@ -1147,6 +1165,18 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 		val |= (ch_mask << SWRM_DP_PORT_CTRL_EN_CHAN_SHFT);
 	} else {
 		val &= ~(0xff << SWRM_DP_PORT_CTRL_EN_CHAN_SHFT);
+	}
+
+	/*
+	 * PCM ports require an extra write to DIN_PCM_PORT_CTRL to gate the
+	 * PCM data path in addition to the per-port enable register.
+	 */
+	if (qcom_swrm_port_is_pcm(bus, enable_ch->port_num)) {
+		ret = ctrl->reg_write(ctrl,
+				      SWRM_DP_PCM_PORT_CTRL(enable_ch->port_num),
+				      enable_ch->enable ? SWRM_DP_PCM_PORT_CTRL_EN : 0);
+		if (ret)
+			return ret;
 	}
 
 	return ctrl->reg_write(ctrl, reg, val);
