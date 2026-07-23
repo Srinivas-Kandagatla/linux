@@ -612,6 +612,10 @@ static const struct auxiliary_device_id class_function_id_table[] = {
 		.name = "snd_soc_sdca." SDCA_FUNCTION_TYPE_SIMPLE_NAME,
 		.driver_data = SDCA_FUNCTION_TYPE_SIMPLE_JACK,
 	},
+	{
+		.name = "snd_soc_sdca." SDCA_FUNCTION_TYPE_SIMPLE_AMP_NAME,
+		.driver_data = SDCA_FUNCTION_TYPE_SIMPLE_AMP,
+	},
 	{},
 };
 MODULE_DEVICE_TABLE(auxiliary, class_function_id_table);
