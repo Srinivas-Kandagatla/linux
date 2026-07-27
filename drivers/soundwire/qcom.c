@@ -194,7 +194,29 @@ struct qcom_swrm_ctrl {
 	u32 max_reg;
 	const unsigned int *reg_layout;
 	void __iomem *mmio;
+	void __iomem *mmio_sec;
 	struct reset_control *audio_cgcr;
+	struct reset_control *audio_cgcr_sec;
+	struct clk *hclk_sec;
+	int irq_sec;
+	bool multilane;
+	/* Lane → register-bank assignment; 0=primary (mmio), 1=secondary (mmio_sec) */
+	u8 lane_banks[SDW_MAX_LANES];
+	/*
+	 * DPn address delta applied on writes routed to mmio_sec.  Computed at
+	 * probe time from the first unified port whose lane maps to the sec
+	 * bank: (first_sec_port - 1) * DPN_STRIDE.  Zero if not multi-lane.
+	 */
+	u32 sec_dpn_offset;
+	/*
+	 * Physical → sec-local lane translation.  qcom,ports-lane-control
+	 * describes each port's physical DATA lane (0..3), which is what the
+	 * slave-side DPn LaneCtrl register expects.  The sec master IP,
+	 * however, numbers its own local lanes 0..(N-1) starting at the first
+	 * physical lane it owns; subtract this count from lane_control on
+	 * sec-side writes.  Set to the number of primary-bank lanes.
+	 */
+	u8 sec_lane_shift;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -230,6 +252,7 @@ struct qcom_swrm_data {
 	u32 default_cols;
 	u32 default_rows;
 	bool sw_clk_gate_required;
+	bool multilane;
 	u32 max_reg;
 	const unsigned int *reg_layout;
 };
@@ -328,6 +351,23 @@ static const struct qcom_swrm_data swrm_v3_0_data = {
 	.max_reg = SWR_V2_0_MSTR_MAX_REG_ADDR,
 	.reg_layout = swrm_v3_0_reg_layout,
 };
+
+/*
+ * Multi-lane variant: a single logical SoundWire controller backed by two
+ * physical IP blocks.  Both use the v3.0 register layout and reach v3.1.0
+ * compliance.  Register layout, default rows/cols and clk-gate behaviour are
+ * identical to swrm_v3_0_data; only the .multilane flag and the DT contract
+ * (two reg ranges, two clocks, two IRQs, two resets, qcom,lane-banks) differ.
+ */
+static const struct qcom_swrm_data swrm_v3_1_0_multilane_data = {
+	.default_rows = 50,
+	.default_cols = 16,
+	.sw_clk_gate_required = true,
+	.multilane = true,
+	.max_reg = SWR_V2_0_MSTR_MAX_REG_ADDR,
+	.reg_layout = swrm_v3_0_reg_layout,
+};
+
 #define to_qcom_sdw(b)	container_of(b, struct qcom_swrm_ctrl, bus)
 
 static int qcom_swrm_ahb_reg_read(struct qcom_swrm_ctrl *ctrl, int reg,
@@ -381,6 +421,68 @@ static int qcom_swrm_cpu_reg_write(struct qcom_swrm_ctrl *ctrl, int reg,
 				   int val)
 {
 	writel(val, ctrl->mmio + reg);
+	return SDW_CMD_OK;
+}
+
+/*
+ * Multi-lane register-bank routing.
+ *
+ * In multi-lane mode the logical SoundWire bus is backed by two physical IP
+ * blocks, each owning a subset of the SoundWire data lanes.  qcom,lane-banks
+ * gives lane → bank assignment (0 = primary mmio, 1 = secondary mmio_sec).
+ * Per-port DPN register writes are routed to the bank that owns the port's
+ * lane; control-path access (FIFO commands, INT/COMP/MCP*) always uses the
+ * primary bank, which is the only one that hosts the SCP control lane.
+ */
+static void __iomem *qcom_swrm_port_mmio(struct qcom_swrm_ctrl *ctrl, int port)
+{
+	u8 lane;
+
+	if (!ctrl->multilane || !ctrl->mmio_sec)
+		return ctrl->mmio;
+
+	if (port <= 0 || port >= ctrl->nports + 1)
+		return ctrl->mmio;
+
+	lane = ctrl->pconfig[port].lane_control;
+	if (lane == SWR_INVALID_PARAM || lane >= SDW_MAX_LANES)
+		return ctrl->mmio;
+
+	return (ctrl->lane_banks[lane] == 0) ? ctrl->mmio : ctrl->mmio_sec;
+}
+
+/*
+ * Multi-lane logical → physical remap for the secondary IP.
+ *
+ * Unified port numbers 1..N run through a single logical DPn register
+ * space, but each backing IP has its own port register bank.  When a
+ * write targets a port that qcom,ports-lane-control routes to the
+ * secondary bank, subtract ctrl->sec_dpn_offset from the reg address
+ * so the write lands on the sec IP's local slot.  The offset is
+ * computed at probe time from the first sec-routed port (see
+ * qcom_swrm_compute_sec_dpn_offset).
+ */
+static int qcom_swrm_port_reg_write(struct qcom_swrm_ctrl *ctrl, int port,
+				    int reg, u32 val)
+{
+	void __iomem *mmio = qcom_swrm_port_mmio(ctrl, port);
+
+	if (mmio == ctrl->mmio)
+		return ctrl->reg_write(ctrl, reg, val);
+
+	writel(val, mmio + reg - ctrl->sec_dpn_offset);
+	return SDW_CMD_OK;
+}
+
+static int qcom_swrm_port_reg_read(struct qcom_swrm_ctrl *ctrl, int port,
+				   int reg, u32 *val)
+{
+	void __iomem *mmio = qcom_swrm_port_mmio(ctrl, port);
+
+	if (mmio == ctrl->mmio)
+		return ctrl->reg_read(ctrl, reg, val);
+
+	*val = readl(mmio + reg - ctrl->sec_dpn_offset);
 	return SDW_CMD_OK;
 }
 
@@ -521,7 +623,6 @@ static int qcom_swrm_cmd_fifo_wr_cmd(struct qcom_swrm_ctrl *ctrl, u8 cmd_data,
 			ret = SDW_CMD_IGNORED;
 		else
 			ret = SDW_CMD_OK;
-
 	} else {
 		ret = SDW_CMD_OK;
 	}
@@ -580,7 +681,6 @@ static int qcom_swrm_cmd_fifo_rd_cmd(struct qcom_swrm_ctrl *ctrl,
 
 	return SDW_CMD_IGNORED;
 }
-
 static int qcom_swrm_get_alert_slave_dev_num(struct qcom_swrm_ctrl *ctrl)
 {
 	u32 val, status;
@@ -879,6 +979,53 @@ static bool swrm_wait_for_frame_gen_enabled(struct qcom_swrm_ctrl *ctrl)
 	return false;
 }
 
+/*
+ * Initialise the secondary IP block to the same bus-level state as the
+ * primary (frame shape, bus clock start, COMP_CFG, interrupt clear).
+ * This is a stripped-down clone of the primary path: no FIFO/SCP/
+ * enumeration setup — those live on the control lane (primary only).
+ */
+static void qcom_swrm_init_secondary(struct qcom_swrm_ctrl *ctrl)
+{
+	u32 val;
+
+	if (!ctrl->multilane || !ctrl->mmio_sec)
+		return;
+
+	if (ctrl->audio_cgcr_sec)
+		reset_control_reset(ctrl->audio_cgcr_sec);
+
+	val = FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK, ctrl->rows_index) |
+	      FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK, ctrl->cols_index);
+	/* Secondary carries rows/cols only; SSP_PERIOD lives on primary. */
+	writel(val, ctrl->mmio_sec + SWRM_MCP_FRAME_CTRL_BANK_ADDR(0));
+
+	if (ctrl->version == SWRM_VERSION_1_7_0) {
+		writel(SWRM_EE_CPU,
+		       ctrl->mmio_sec + SWRM_LINK_MANAGER_EE);
+		writel(SWRM_MCP_BUS_CLK_START << SWRM_EE_CPU,
+		       ctrl->mmio_sec + SWRM_MCP_BUS_CTRL);
+	} else if (ctrl->version >= SWRM_VERSION_2_0_0) {
+		writel(SWRM_EE_CPU,
+		       ctrl->mmio_sec + SWRM_LINK_MANAGER_EE);
+		writel(SWRM_V2_0_CLK_CTRL_CLK_START,
+		       ctrl->mmio_sec + SWRM_V2_0_CLK_CTRL);
+	} else {
+		writel(SWRM_MCP_BUS_CLK_START,
+		       ctrl->mmio_sec + SWRM_MCP_BUS_CTRL);
+	}
+
+	/* Enable COMP + IRQ pulse mode on the secondary so its frame
+	 * generation runs alongside the primary. */
+	writel(SWRM_COMP_CFG_ENABLE_MSK | SWRM_COMP_CFG_IRQ_LEVEL_OR_PULSE_MSK,
+	       ctrl->mmio_sec + SWRM_COMP_CFG_ADDR);
+
+	/* Clear any pending interrupts; the secondary IRQ handler treats
+	 * frame/clock errors as soft. */
+	writel(0xFFFFFFFF,
+	       ctrl->mmio_sec + ctrl->reg_layout[SWRM_REG_INTERRUPT_CLEAR]);
+}
+
 static int qcom_swrm_init(struct qcom_swrm_ctrl *ctrl)
 {
 	u32 val;
@@ -886,7 +1033,6 @@ static int qcom_swrm_init(struct qcom_swrm_ctrl *ctrl)
 	/* Clear Rows and Cols */
 	val = FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK, ctrl->rows_index);
 	val |= FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK, ctrl->cols_index);
-
 	reset_control_reset(ctrl->audio_cgcr);
 
 	ctrl->reg_write(ctrl, SWRM_MCP_FRAME_CTRL_BANK_ADDR(0), val);
@@ -904,6 +1050,16 @@ static int qcom_swrm_init(struct qcom_swrm_ctrl *ctrl)
 	ctrl->reg_read(ctrl, SWRM_MCP_CFG_ADDR, &val);
 	u32p_replace_bits(&val, SWRM_DEF_CMD_NO_PINGS, SWRM_MCP_CFG_MAX_NUM_OF_CMD_NO_PINGS_BMSK);
 	ctrl->reg_write(ctrl, SWRM_MCP_CFG_ADDR, val);
+
+	/*
+	 * In multi-lane mode the primary is a dependent master — it needs the
+	 * secondary (sync source) fully initialised (frame ctrl, bus-clock
+	 * start) before its own bus clock starts and it waits for
+	 * frame_gen_enabled.  If we ran secondary init at the tail of primary
+	 * init instead, the primary would start free-running and lose sync at
+	 * the first real bank switch.
+	 */
+	qcom_swrm_init_secondary(ctrl);
 
 	if (ctrl->version == SWRM_VERSION_1_7_0) {
 		ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, SWRM_EE_CPU);
@@ -1016,7 +1172,6 @@ static enum sdw_command_response qcom_swrm_xfer_msg(struct sdw_bus *bus,
 
 	return SDW_CMD_OK;
 }
-
 static int qcom_swrm_pre_bank_switch(struct sdw_bus *bus)
 {
 	u32 reg = SWRM_MCP_FRAME_CTRL_BANK_ADDR(bus->params.next_bank);
@@ -1028,6 +1183,9 @@ static int qcom_swrm_pre_bank_switch(struct sdw_bus *bus)
 	u32p_replace_bits(&val, ctrl->cols_index, SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK);
 	u32p_replace_bits(&val, ctrl->rows_index, SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK);
 
+	if (ctrl->multilane && ctrl->mmio_sec)
+		writel(val, ctrl->mmio_sec + reg);
+
 	return ctrl->reg_write(ctrl, reg, val);
 }
 
@@ -1038,7 +1196,8 @@ static int qcom_swrm_port_params(struct sdw_bus *bus,
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
 	u32 offset = ctrl->reg_layout[SWRM_OFFSET_DP_BLOCK_CTRL_1];
 
-	return ctrl->reg_write(ctrl, SWRM_DPn_BLOCK_CTRL_1(offset, p_params->num),
+	return qcom_swrm_port_reg_write(ctrl, p_params->num,
+				SWRM_DPn_BLOCK_CTRL_1(offset, p_params->num),
 				p_params->bps - 1);
 }
 
@@ -1060,7 +1219,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 	value |= pcfg->off2 << SWRM_DP_PORT_CTRL_OFFSET2_SHFT;
 	value |= pcfg->si & 0xff;
 
-	ret = ctrl->reg_write(ctrl, reg, value);
+	ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 	if (ret)
 		goto err;
 
@@ -1069,7 +1228,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 		value = (pcfg->si >> 8) & 0xff;
 		reg = SWRM_DPn_SAMPLECTRL2_BANK(offset, params->port_num, bank);
 
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 		if (ret)
 			goto err;
 	}
@@ -1079,7 +1238,14 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 		reg = SWRM_DPn_PORT_CTRL_2_BANK(offset, params->port_num, bank);
 
 		value = pcfg->lane_control;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		/*
+		 * qcom,ports-lane-control values are physical DATA lane
+		 * indices; translate to sec-local for ports routed there.
+		 */
+		if (ctrl->multilane &&
+		    qcom_swrm_port_mmio(ctrl, params->port_num) == ctrl->mmio_sec)
+			value -= ctrl->sec_lane_shift;
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 		if (ret)
 			goto err;
 	}
@@ -1090,7 +1256,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 		reg = SWRM_DPn_BLOCK_CTRL2_BANK(offset, params->port_num, bank);
 
 		value = pcfg->blk_group_count;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 		if (ret)
 			goto err;
 	}
@@ -1100,10 +1266,10 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 
 	if (pcfg->hstart != SWR_INVALID_PARAM && pcfg->hstop != SWR_INVALID_PARAM) {
 		value = (pcfg->hstop << 4) | pcfg->hstart;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 	} else {
 		value = (SWR_HSTOP_MAX_VAL << 4) | SWR_HSTART_MIN_VAL;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 	}
 
 	if (ret)
@@ -1112,7 +1278,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 	if (pcfg->bp_mode != SWR_INVALID_PARAM) {
 		offset = ctrl->reg_layout[SWRM_OFFSET_DP_BLOCK_CTRL3_BANK];
 		reg = SWRM_DPn_BLOCK_CTRL3_BANK(offset, params->port_num, bank);
-		ret = ctrl->reg_write(ctrl, reg, pcfg->bp_mode);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, pcfg->bp_mode);
 	}
 
 err:
@@ -1146,19 +1312,19 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 
 	reg = SWRM_DPn_PORT_CTRL_BANK(offset, enable_ch->port_num, bank);
 
-	ctrl->reg_read(ctrl, reg, &val);
+	qcom_swrm_port_reg_read(ctrl, enable_ch->port_num, reg, &val);
 
 	if (enable_ch->enable) {
 		u8 ch_mask = ctrl->pconfig[enable_ch->port_num].ch_mask;
 
 		/*
 		 * Prefer the per-port ch_mask from DT (qcom,ports-ch-mask) when
-		 * present.  The SDCA stream setup path arrives here with
-		 * enable_ch->ch_mask reflecting stream-level ch_count, which
-		 * for a mono PCM opening a stereo port only enables channel 0
-		 * on the wire.  The DT value describes the port's intrinsic
-		 * channel layout (e.g. 0x3 for a 2-channel stereo port) so both
-		 * slots are transmitted regardless of PCM channel count.
+		 * present; the SDCA stream setup path arrives here with
+		 * enable_ch->ch_mask reflecting stream-level ch_count, which for
+		 * a mono PCM opening a stereo port only enables channel 0 on
+		 * the wire.  The DT value describes the port's intrinsic channel
+		 * layout (e.g. 0x3 for a 2-channel stereo HPH port) so both
+		 * PDM slots are transmitted regardless of PCM channel count.
 		 */
 		if (ch_mask == SWR_INVALID_PARAM)
 			ch_mask = enable_ch->ch_mask;
@@ -1172,14 +1338,14 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 	 * PCM data path in addition to the per-port enable register.
 	 */
 	if (qcom_swrm_port_is_pcm(bus, enable_ch->port_num)) {
-		ret = ctrl->reg_write(ctrl,
-				      SWRM_DP_PCM_PORT_CTRL(enable_ch->port_num),
-				      enable_ch->enable ? SWRM_DP_PCM_PORT_CTRL_EN : 0);
+		ret = qcom_swrm_port_reg_write(ctrl, enable_ch->port_num,
+					       SWRM_DP_PCM_PORT_CTRL(enable_ch->port_num),
+					       enable_ch->enable ? SWRM_DP_PCM_PORT_CTRL_EN : 0);
 		if (ret)
 			return ret;
 	}
 
-	return ctrl->reg_write(ctrl, reg, val);
+	return qcom_swrm_port_reg_write(ctrl, enable_ch->port_num, reg, val);
 }
 
 static const struct sdw_master_port_ops qcom_swrm_port_ops = {
@@ -1209,6 +1375,12 @@ static int qcom_swrm_compute_params(struct sdw_bus *bus, struct sdw_stream_runti
 		list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 			pcfg = &ctrl->pconfig[p_rt->num];
 			p_rt->transport_params.port_num = p_rt->num;
+			/*
+			 * Always set port_params.num so the master port_params
+			 * callback (qcom_swrm_port_params) receives the right
+			 * port number even for ports without a DT word_length.
+			 */
+			p_rt->port_params.num = p_rt->num;
 			if (pcfg->word_length != SWR_INVALID_PARAM) {
 				sdw_fill_port_params(&p_rt->port_params,
 					     p_rt->num,  pcfg->word_length + 1,
@@ -1238,6 +1410,8 @@ static int qcom_swrm_compute_params(struct sdw_bus *bus, struct sdw_stream_runti
 				p_rt->transport_params.hstart = pcfg->hstart;
 				p_rt->transport_params.hstop = pcfg->hstop;
 				p_rt->transport_params.lane_ctrl = pcfg->lane_control;
+				/* See comment above the master loop. */
+				p_rt->port_params.num = p_rt->num;
 				if (pcfg->word_length != SWR_INVALID_PARAM) {
 					sdw_fill_port_params(&p_rt->port_params,
 						     p_rt->num,
@@ -1245,6 +1419,7 @@ static int qcom_swrm_compute_params(struct sdw_bus *bus, struct sdw_stream_runti
 						     SDW_PORT_FLOW_MODE_ISOCH,
 						     SDW_PORT_DATA_MODE_NORMAL);
 				}
+
 				i++;
 			}
 		}
@@ -1286,7 +1461,7 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 	struct sdw_port_runtime *p_rt;
 	struct sdw_slave *slave;
 	unsigned long *port_mask;
-	int maxport, pn, nports = 0;
+	int maxport, pn, nports = 0, ret;
 	unsigned int m_port;
 	struct sdw_port_config *pconfig __free(kfree) = kzalloc_objs(*pconfig,
 								     ctrl->nports);
@@ -1298,11 +1473,20 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 	else
 		sconfig.direction = SDW_DATA_DIR_RX;
 
-	/* hw parameters will be ignored as we only support PDM */
 	sconfig.ch_count = 1;
 	sconfig.frame_rate = params_rate(params);
 	sconfig.type = stream->type;
-	sconfig.bps = 1;
+	/*
+	 * Codecs on the same stream disagree on the stream-wide BPS
+	 * convention (WSA codecs hardcode 1; SDCA codecs derive from
+	 * PCM format width via snd_sdw_params_to_config()).  The master
+	 * doesn't know which codec is on the other side, so match
+	 * whatever the codec's add_slave already stored on the stream;
+	 * fall back to 1 if this is the first call.  The actual wire
+	 * BPS is per-port and set by compute_params() from
+	 * qcom,ports-word-length, not from this value.
+	 */
+	sconfig.bps = stream->params.bps ?: 1;
 
 	guard(mutex)(&ctrl->port_lock);
 
@@ -1336,15 +1520,18 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
 				set_bit(pn, port_mask);
 				pconfig[nports].num = pn;
 				pconfig[nports].ch_mask = p_rt->ch_mask;
+
 				nports++;
 			}
 		}
 	}
 
-	sdw_stream_add_master(&ctrl->bus, &sconfig, pconfig,
-			      nports, stream);
+	ret = sdw_stream_add_master(&ctrl->bus, &sconfig, pconfig,
+				    nports, stream);
+	if (ret)
+		dev_err(ctrl->dev, "add_master failed: %d\n", ret);
 
-	return 0;
+	return ret;
 }
 
 static int qcom_swrm_hw_params(struct snd_pcm_substream *substream,
@@ -1475,6 +1662,50 @@ static int qcom_swrm_register_dais(struct qcom_swrm_ctrl *ctrl)
 						dais, num_dais);
 }
 
+static int qcom_swrm_get_lane_banks(struct qcom_swrm_ctrl *ctrl)
+{
+	struct device *dev = ctrl->dev;
+	int nlanes, i;
+
+	/* Default all lanes to primary bank in non-multilane mode. */
+	memset(ctrl->lane_banks, 0, sizeof(ctrl->lane_banks));
+
+	if (!ctrl->multilane)
+		return 0;
+
+	nlanes = of_property_count_u8_elems(dev->of_node, "qcom,lane-banks");
+	if (nlanes < 1) {
+		dev_err(dev, "multilane: qcom,lane-banks missing or empty\n");
+		return -EINVAL;
+	}
+	if (nlanes > SDW_MAX_LANES) {
+		dev_err(dev, "multilane: qcom,lane-banks too long (%d > %d)\n",
+			nlanes, SDW_MAX_LANES);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < nlanes; i++) {
+		u8 bank;
+		int ret = of_property_read_u8_index(dev->of_node,
+						    "qcom,lane-banks", i, &bank);
+		if (ret)
+			return ret;
+		if (bank > 1) {
+			dev_err(dev, "multilane: lane %d bank %u out of range\n",
+				i, bank);
+			return -EINVAL;
+		}
+		ctrl->lane_banks[i] = bank;
+	}
+
+	if (ctrl->lane_banks[0] != 0) {
+		dev_err(dev, "multilane: lane 0 must be on primary bank\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int qcom_swrm_get_port_config(struct qcom_swrm_ctrl *ctrl)
 {
 	struct device_node *np = ctrl->dev->of_node;
@@ -1567,6 +1798,50 @@ static int qcom_swrm_get_port_config(struct qcom_swrm_ctrl *ctrl)
 	return 0;
 }
 
+/*
+ * Multi-lane secondary-IP DPn address delta.
+ *
+ * The unified port register space is contiguous.  Ports 1..P route to
+ * the primary IP; ports P+1..N route to the secondary IP as its local
+ * slots 1..(N-P).  Find P by scanning qcom,ports-lane-control for the
+ * first port whose lane maps to the secondary bank, and store the
+ * corresponding byte-offset delta in ctrl->sec_dpn_offset.  For single
+ * -IP (non-multilane) controllers, leave the delta at zero.
+ */
+#define SWRM_DPN_SLOT_STRIDE	0x100
+static void qcom_swrm_compute_sec_dpn_offset(struct qcom_swrm_ctrl *ctrl)
+{
+	int i;
+
+	ctrl->sec_dpn_offset = 0;
+	ctrl->sec_lane_shift = 0;
+	if (!ctrl->multilane)
+		return;
+
+	/*
+	 * Sec-local lane numbering starts at the first sec-owned physical
+	 * lane; the shift equals the number of consecutive primary lanes at
+	 * the low end of lane_banks[].
+	 */
+	for (i = 0; i < SDW_MAX_LANES; i++) {
+		if (ctrl->lane_banks[i] == 0)
+			ctrl->sec_lane_shift++;
+		else
+			break;
+	}
+
+	for (i = 1; i <= ctrl->nports; i++) {
+		u8 lane = ctrl->pconfig[i].lane_control;
+
+		if (lane == SWR_INVALID_PARAM || lane >= SDW_MAX_LANES)
+			continue;
+		if (ctrl->lane_banks[lane] == 1) {
+			ctrl->sec_dpn_offset = (i - 1) * SWRM_DPN_SLOT_STRIDE;
+			return;
+		}
+	}
+}
+
 #ifdef CONFIG_DEBUG_FS
 static int swrm_reg_show(struct seq_file *s_file, void *data)
 {
@@ -1614,6 +1889,7 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	ctrl->reg_layout = data->reg_layout;
 	ctrl->rows_index = sdw_find_row_index(data->default_rows);
 	ctrl->cols_index = sdw_find_col_index(data->default_cols);
+	ctrl->multilane = data->multilane;
 #if IS_REACHABLE(CONFIG_SLIMBUS)
 	if (dev->parent->bus == &slimbus_bus) {
 #else
@@ -1627,27 +1903,61 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	} else {
 		ctrl->reg_read = qcom_swrm_cpu_reg_read;
 		ctrl->reg_write = qcom_swrm_cpu_reg_write;
-		ctrl->mmio = devm_platform_ioremap_resource(pdev, 0);
-		if (IS_ERR(ctrl->mmio))
-			return PTR_ERR(ctrl->mmio);
+		if (ctrl->multilane) {
+			ctrl->mmio = devm_platform_ioremap_resource_byname(pdev, "primary");
+			if (IS_ERR(ctrl->mmio))
+				return dev_err_probe(dev, PTR_ERR(ctrl->mmio),
+						     "multilane: missing primary reg\n");
+			ctrl->mmio_sec = devm_platform_ioremap_resource_byname(pdev, "secondary");
+			if (IS_ERR(ctrl->mmio_sec))
+				return dev_err_probe(dev, PTR_ERR(ctrl->mmio_sec),
+						     "multilane: missing secondary reg\n");
+		} else {
+			ctrl->mmio = devm_platform_ioremap_resource(pdev, 0);
+			if (IS_ERR(ctrl->mmio))
+				return PTR_ERR(ctrl->mmio);
+		}
 	}
 
 	if (data->sw_clk_gate_required) {
-		ctrl->audio_cgcr = devm_reset_control_get_optional_exclusive(dev, "swr_audio_cgcr");
+		const char *primary_cgcr = ctrl->multilane ? "primary" : "swr_audio_cgcr";
+
+		ctrl->audio_cgcr = devm_reset_control_get_optional_exclusive(dev, primary_cgcr);
 		if (IS_ERR(ctrl->audio_cgcr)) {
 			dev_err(dev, "Failed to get cgcr reset ctrl required for SW gating\n");
 			ret = PTR_ERR(ctrl->audio_cgcr);
 			goto err_init;
 		}
+		if (ctrl->multilane) {
+			ctrl->audio_cgcr_sec =
+				devm_reset_control_get_optional_exclusive(dev, "secondary");
+			if (IS_ERR(ctrl->audio_cgcr_sec)) {
+				ret = dev_err_probe(dev, PTR_ERR(ctrl->audio_cgcr_sec),
+						    "multilane: secondary cgcr\n");
+				goto err_init;
+			}
+		}
 	}
 
-	ctrl->irq = of_irq_get(dev->of_node, 0);
+	if (ctrl->multilane)
+		ctrl->irq = of_irq_get_byname(dev->of_node, "primary");
+	else
+		ctrl->irq = of_irq_get(dev->of_node, 0);
 	if (ctrl->irq < 0) {
 		ret = ctrl->irq;
 		goto err_init;
 	}
 
-	ctrl->hclk = devm_clk_get(dev, "iface");
+	if (ctrl->multilane) {
+		ctrl->irq_sec = of_irq_get_byname(dev->of_node, "secondary");
+		if (ctrl->irq_sec < 0) {
+			ret = dev_err_probe(dev, ctrl->irq_sec,
+					    "multilane: secondary IRQ\n");
+			goto err_init;
+		}
+	}
+
+	ctrl->hclk = devm_clk_get(dev, ctrl->multilane ? "primary" : "iface");
 	if (IS_ERR(ctrl->hclk)) {
 		ret = dev_err_probe(dev, PTR_ERR(ctrl->hclk), "unable to get iface clock\n");
 		goto err_init;
@@ -1655,8 +1965,22 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 
 	clk_prepare_enable(ctrl->hclk);
 
+	if (ctrl->multilane) {
+		ctrl->hclk_sec = devm_clk_get(dev, "secondary");
+		if (IS_ERR(ctrl->hclk_sec)) {
+			ret = dev_err_probe(dev, PTR_ERR(ctrl->hclk_sec),
+					    "multilane: secondary iface clock\n");
+			goto err_clk;
+		}
+		clk_prepare_enable(ctrl->hclk_sec);
+	}
+
 	ctrl->dev = dev;
 	dev_set_drvdata(&pdev->dev, ctrl);
+
+	ret = qcom_swrm_get_lane_banks(ctrl);
+	if (ret)
+		goto err_clk;
 	mutex_init(&ctrl->port_lock);
 	init_completion(&ctrl->broadcast);
 	init_completion(&ctrl->enumeration);
@@ -1669,6 +1993,8 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	ret = qcom_swrm_get_port_config(ctrl);
 	if (ret)
 		goto err_clk;
+
+	qcom_swrm_compute_sec_dpn_offset(ctrl);
 
 	params = &ctrl->bus.params;
 	params->max_dr_freq = DEFAULT_CLK_FREQ;
@@ -1754,6 +2080,8 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 err_master_add:
 	sdw_bus_master_delete(&ctrl->bus);
 err_clk:
+	if (ctrl->hclk_sec)
+		clk_disable_unprepare(ctrl->hclk_sec);
 	clk_disable_unprepare(ctrl->hclk);
 err_init:
 	return ret;
@@ -1764,6 +2092,8 @@ static void qcom_swrm_remove(struct platform_device *pdev)
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
 
 	sdw_bus_master_delete(&ctrl->bus);
+	if (ctrl->hclk_sec)
+		clk_disable_unprepare(ctrl->hclk_sec);
 	clk_disable_unprepare(ctrl->hclk);
 }
 
@@ -1778,6 +2108,9 @@ static int __maybe_unused swrm_runtime_resume(struct device *dev)
 	}
 
 	clk_prepare_enable(ctrl->hclk);
+
+	if (ctrl->multilane)
+		clk_prepare_enable(ctrl->hclk_sec);
 
 	if (ctrl->clock_stop_not_supported) {
 		reinit_completion(&ctrl->enumeration);
@@ -1797,6 +2130,8 @@ static int __maybe_unused swrm_runtime_resume(struct device *dev)
 		sdw_handle_slave_status(&ctrl->bus, ctrl->status);
 	} else {
 		reset_control_reset(ctrl->audio_cgcr);
+		if (ctrl->audio_cgcr_sec)
+			reset_control_reset(ctrl->audio_cgcr_sec);
 
 		if (ctrl->version == SWRM_VERSION_1_7_0) {
 			ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, SWRM_EE_CPU);
@@ -1884,6 +2219,8 @@ static const struct of_device_id qcom_swrm_of_match[] = {
 	{ .compatible = "qcom,soundwire-v1.7.0", .data = &swrm_v1_5_data },
 	{ .compatible = "qcom,soundwire-v2.0.0", .data = &swrm_v2_0_data },
 	{ .compatible = "qcom,soundwire-v3.1.0", .data = &swrm_v3_0_data },
+	{ .compatible = "qcom,soundwire-multilane-v3.1.0",
+	  .data = &swrm_v3_1_0_multilane_data },
 	{/* sentinel */},
 };
 
