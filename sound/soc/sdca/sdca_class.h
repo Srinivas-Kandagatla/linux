@@ -23,6 +23,14 @@ struct sdca_function_data;
 /**
  * struct sdca_class_hw_ops - optional device-specific hardware callbacks
  * @hw_init: called during probe to enable supplies, toggle reset GPIO, etc.
+ * @populate_function: called from the SDCA class function driver when no
+ *             DisCo/ACPI firmware node is available (e.g. DT/ARM platforms),
+ *             as a substitute for sdca_parse_function().  The callback must
+ *             fill in @function (entities, clusters, init_table, delays, ...)
+ *             from its own static tables selected by @function->desc->type
+ *             and must leave @function->desc alone -- the framework owns the
+ *             per-instance descriptor.  Return 0 on success or a negative
+ *             errno if no matching template is known.  May be NULL.
  *
  * Codec-specific SoundWire drivers pass a pointer to this struct to
  * sdca_class_probe() from their sdw_driver.probe.  Codec-specific
@@ -32,6 +40,8 @@ struct sdca_function_data;
  */
 struct sdca_class_hw_ops {
 	int  (*hw_init)(struct sdw_slave *slave);
+	int  (*populate_function)(struct sdw_slave *slave,
+				  struct sdca_function_data *function);
 };
 
 struct sdca_class_drv {

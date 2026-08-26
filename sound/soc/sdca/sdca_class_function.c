@@ -329,7 +329,22 @@ static int class_function_probe(struct auxiliary_device *auxdev,
 	drv->core = core;
 	drv->function = &sdev->function;
 
-	ret = sdca_parse_function(dev, drv->function);
+	if (drv->function->desc->node) {
+		ret = sdca_parse_function(dev, drv->function);
+	} else if (core->hw_ops && core->hw_ops->populate_function) {
+		/*
+		 * No DisCo/ACPI firmware node available (e.g. DT/ARM platform).
+		 * Let the device-specific hw_ops fill in @drv->function from
+		 * its own static tables, matching by function type.  The
+		 * per-instance desc set up by sdca_dev_register_functions()
+		 * stays untouched -- the callback contract forbids touching
+		 * @function->desc.
+		 */
+		ret = core->hw_ops->populate_function(core->sdw, drv->function);
+	} else {
+		dev_err(dev, "no firmware node and no populate_function hook\n");
+		return -ENOENT;
+	}
 	if (ret)
 		return ret;
 
