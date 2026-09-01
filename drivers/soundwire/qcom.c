@@ -1120,7 +1120,10 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 	pcfg = &ctrl->pconfig[params->port_num];
 
 	value = pcfg->off1 << SWRM_DP_PORT_CTRL_OFFSET1_SHFT;
-	value |= pcfg->off2 << SWRM_DP_PORT_CTRL_OFFSET2_SHFT;
+
+	if (pcfg->off2 != SWR_INVALID_PARAM)
+		value |= pcfg->off2 << SWRM_DP_PORT_CTRL_OFFSET2_SHFT;
+
 	value |= pcfg->si & 0xff;
 
 	ret = ctrl->reg_write(ctrl, reg, value);
