@@ -437,6 +437,8 @@
 #define WSA883X_VERSION_1_0 0
 #define WSA883X_VERSION_1_1 1
 
+#define SWRS_SCP_HOST_CLK_DIV2_CTL_BANK(m)	(0xE0 + 0x10 * (m))
+
 #define WSA883X_MAX_SWR_PORTS   4
 #define WSA883X_RATES (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
 			SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_48000 |\
@@ -467,8 +469,11 @@ struct wsa883x_priv {
 	struct regulator *vdd;
 	struct sdw_slave *slave;
 	struct sdw_stream_config sconfig;
+	struct sdw_stream_config vi_sconfig;
 	struct sdw_stream_runtime *sruntime;
+	struct sdw_stream_runtime *vi_sruntime;
 	struct sdw_port_config port_config[WSA883X_MAX_SWR_PORTS];
+	struct sdw_port_config vi_port_config;
 	struct gpio_desc *sd_n;
 	struct reset_control *sd_reset;
 	bool port_prepared[WSA883X_MAX_SWR_PORTS];
@@ -521,7 +526,7 @@ enum {
 static const struct soc_enum wsa_dev_mode_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(wsa_dev_mode_text), wsa_dev_mode_text);
 
-/* 4 ports */
+/* 3 sink ports, VISENSE is a source port */
 static struct sdw_dpn_prop wsa_sink_dpn_prop[WSA883X_MAX_SWR_PORTS] = {
 	[WSA883X_PORT_DAC] = {
 		.num = WSA883X_PORT_DAC + 1,
@@ -547,14 +552,18 @@ static struct sdw_dpn_prop wsa_sink_dpn_prop[WSA883X_MAX_SWR_PORTS] = {
 		.simple_ch_prep_sm = true,
 		.read_only_wordlength = true,
 	},
-	[WSA883X_PORT_VISENSE] = {
+};
+
+static struct sdw_dpn_prop wsa_src_dpn_prop[] = {
+	{
 		.num = WSA883X_PORT_VISENSE + 1,
 		.type = SDW_DPN_SIMPLE,
 		.min_ch = 1,
-		.max_ch = 1,
+		/* VISENSE carries the V and I sense pair */
+		.max_ch = 2,
 		.simple_ch_prep_sm = true,
 		.read_only_wordlength = true,
-	}
+	},
 };
 
 static const struct sdw_port_config wsa883x_pconfig[WSA883X_MAX_SWR_PORTS] = {
@@ -572,7 +581,8 @@ static const struct sdw_port_config wsa883x_pconfig[WSA883X_MAX_SWR_PORTS] = {
 	},
 	[WSA883X_PORT_VISENSE] = {
 		.num = WSA883X_PORT_VISENSE + 1,
-		.ch_mask = 0x1,
+		/* V and I sense pair */
+		.ch_mask = 0x3,
 	},
 };
 
@@ -1124,8 +1134,16 @@ static int wsa883x_port_prep(struct sdw_slave *slave,
 	return 0;
 }
 
+static int wsa883x_bus_config(struct sdw_slave *slave,
+			      struct sdw_bus_params *params)
+{
+	sdw_write(slave, SWRS_SCP_HOST_CLK_DIV2_CTL_BANK(params->next_bank), 0x01);
+	return 0;
+}
+
 static const struct sdw_slave_ops wsa883x_slave_ops = {
 	.update_status = wsa883x_update_status,
+	.bus_config = wsa883x_bus_config,
 	.port_prep = wsa883x_port_prep,
 };
 
@@ -1334,6 +1352,25 @@ static const struct snd_soc_component_driver wsa883x_component_drv = {
 	.num_dapm_routes = ARRAY_SIZE(wsa883x_audio_map),
 };
 
+static int wsa883x_vi_hw_params(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params,
+				struct snd_soc_dai *dai)
+{
+	struct wsa883x_priv *wsa883x = dev_get_drvdata(dai->dev);
+
+	wsa883x->vi_port_config = wsa883x_pconfig[WSA883X_PORT_VISENSE];
+	wsa883x->vi_sconfig.frame_rate = params_rate(params);
+	/* VISENSE carries the V and I sense pair */
+	wsa883x->vi_sconfig.ch_count = 2;
+	wsa883x->vi_sconfig.bps = 1;
+	wsa883x->vi_sconfig.type = SDW_STREAM_PDM;
+	wsa883x->vi_sconfig.direction = SDW_DATA_DIR_TX;
+
+	return sdw_stream_add_slave(wsa883x->slave, &wsa883x->vi_sconfig,
+				    &wsa883x->vi_port_config, 1,
+				    wsa883x->vi_sruntime);
+}
+
 static int wsa883x_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params,
 			     struct snd_soc_dai *dai)
@@ -1343,6 +1380,9 @@ static int wsa883x_hw_params(struct snd_pcm_substream *substream,
 
 	wsa883x->active_ports = 0;
 	for (i = 0; i < WSA883X_MAX_SWR_PORTS; i++) {
+		/* VISENSE is driven by the separate VI capture DAI */
+		if (i == WSA883X_PORT_VISENSE)
+			continue;
 		if (!wsa883x->port_enable[i])
 			continue;
 
@@ -1362,7 +1402,10 @@ static int wsa883x_hw_free(struct snd_pcm_substream *substream,
 {
 	struct wsa883x_priv *wsa883x = dev_get_drvdata(dai->dev);
 
-	sdw_stream_remove_slave(wsa883x->slave, wsa883x->sruntime);
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		sdw_stream_remove_slave(wsa883x->slave, wsa883x->vi_sruntime);
+	else
+		sdw_stream_remove_slave(wsa883x->slave, wsa883x->sruntime);
 
 	return 0;
 }
@@ -1372,7 +1415,10 @@ static int wsa883x_set_sdw_stream(struct snd_soc_dai *dai,
 {
 	struct wsa883x_priv *wsa883x = dev_get_drvdata(dai->dev);
 
-	wsa883x->sruntime = stream;
+	if (direction == SNDRV_PCM_STREAM_CAPTURE)
+		wsa883x->vi_sruntime = stream;
+	else
+		wsa883x->sruntime = stream;
 
 	return 0;
 }
@@ -1400,6 +1446,12 @@ static int wsa883x_digital_mute(struct snd_soc_dai *dai, int mute, int stream)
 	return 0;
 }
 
+static const struct snd_soc_dai_ops wsa883x_vi_dai_ops = {
+	.hw_params = wsa883x_vi_hw_params,
+	.hw_free = wsa883x_hw_free,
+	.set_stream = wsa883x_set_sdw_stream,
+};
+
 static const struct snd_soc_dai_ops wsa883x_dai_ops = {
 	.hw_params = wsa883x_hw_params,
 	.hw_free = wsa883x_hw_free,
@@ -1421,6 +1473,19 @@ static struct snd_soc_dai_driver wsa883x_dais[] = {
 			.channels_max = 1,
 		},
 		.ops = &wsa883x_dai_ops,
+	},
+	{
+		.name = "VI",
+		.capture = {
+			.stream_name = "VI Capture",
+			.rates = WSA883X_RATES | WSA883X_FRAC_RATES,
+			.formats = WSA883X_FORMATS,
+			.rate_min = 8000,
+			.rate_max = 352800,
+			.channels_min = 1,
+			.channels_max = 2,
+		},
+		.ops = &wsa883x_vi_dai_ops,
 	},
 };
 
@@ -1635,9 +1700,11 @@ static int wsa883x_probe(struct sdw_slave *pdev,
 					WSA883X_MAX_SWR_PORTS))
 		dev_dbg(dev, "Static Port mapping not specified\n");
 
-	pdev->prop.sink_ports = GENMASK(WSA883X_MAX_SWR_PORTS - 1, 0);
+	pdev->prop.sink_ports = GENMASK(WSA883X_PORT_BOOST, 0);
+	pdev->prop.source_ports = BIT(WSA883X_PORT_VISENSE);
 	pdev->prop.simple_clk_stop_capable = true;
 	pdev->prop.sink_dpn_prop = wsa_sink_dpn_prop;
+	pdev->prop.src_dpn_prop = wsa_src_dpn_prop;
 	pdev->prop.scp_int1_mask = SDW_SCP_INT1_BUS_CLASH | SDW_SCP_INT1_PARITY;
 
 	wsa883x_reset_deassert(wsa883x);
