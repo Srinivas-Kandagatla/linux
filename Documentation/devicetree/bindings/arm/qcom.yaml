@@ -178,6 +178,7 @@ properties:
 
       - items:
           - enum:
+              - lenovo,thinkpad-t14s-gen7
               - qcom,mahua-crd
           - const: qcom,mahua
 
