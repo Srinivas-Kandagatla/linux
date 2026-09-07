@@ -223,11 +223,12 @@ int sdca_class_probe(struct sdw_slave *sdw,
 	pm_runtime_set_autosuspend_delay(dev, 250);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_set_active(dev);
-	pm_runtime_get_noresume(dev);
 
 	ret = devm_pm_runtime_enable(dev);
 	if (ret)
 		return ret;
+
+	pm_runtime_get_noresume(dev);
 
 	ret = devm_add_action_or_reset(dev, sdca_class_cancel_boot_work, drv);
 	if (ret)
