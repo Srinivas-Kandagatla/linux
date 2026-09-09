@@ -10,6 +10,7 @@
 #include <linux/debugfs.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
@@ -113,6 +114,7 @@
 #define SWRM_DPn_SAMPLECTRL2_BANK(offset, n, m)	(offset + 0x100 * (n - 1) + 0x40 * m)
 #define SWRM_DP_PCM_PORT_CTRL(n)		(0x1054 + 0x100 * (n))
 #define SWRM_DP_PCM_PORT_CTRL_EN				0x03
+#define SWRM_DPn_SLOT_STRIDE			0x100
 
 #define SWR_V1_3_MSTR_MAX_REG_ADDR				0x1740
 #define SWR_V2_0_MSTR_MAX_REG_ADDR				0x50ac
@@ -218,7 +220,26 @@ struct qcom_swrm_ctrl {
 	 * brought the frame generator up.
 	 */
 	bool lane_provider_ready;
+	/*
+	 * Consumer state.  sec_ctrl is the single provider IP whose
+	 * DATA lanes we borrow (NULL when this bus has no secondary).
+	 * Bus lanes [sec_first_lane, sec_first_lane + num_sec_lanes)
+	 * map to sec_ctrl's local lanes [0, num_sec_lanes).  DT
+	 * enforcement in qcom_swrm_setup_secondary() keeps this shape.
+	 */
+	struct qcom_swrm_ctrl *sec_ctrl;
+	struct qcom_swrm_ctrl *primary_ctrl;
+	u8 sec_first_lane;
+	u8 num_sec_lanes;
+	bool is_primary;
 	bool is_secondary;
+	/*
+	 * DPn address delta applied to per-port register writes routed
+	 * to sec_ctrl.  Computed once at setup from the first port
+	 * whose lane_control lands on a secondary lane: the N-th
+	 * secondary-owned port maps to sec_ctrl's DPn slot N (1..K).
+	 */
+	u32 sec_dpn_offset;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -1067,7 +1088,46 @@ static int qcom_swrm_pre_bank_switch(struct sdw_bus *bus)
 	u32p_replace_bits(&val, ctrl->cols_index, SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK);
 	u32p_replace_bits(&val, ctrl->rows_index, SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK);
 
+	/*
+	 * Mirror FRAME_CTRL_BANK to the secondary so its frame generator
+	 * stays in sync with ours across bank switches.
+	 */
+	if (ctrl->sec_ctrl)
+		ctrl->sec_ctrl->reg_write(ctrl->sec_ctrl, reg, val);
+
 	return ctrl->reg_write(ctrl, reg, val);
+}
+
+/*
+ * Per-port DPn register dispatch.  If the port's lane_control names a
+ * bus lane owned by our secondary provider, translate the DPn address
+ * to the provider's local slot (by subtracting sec_dpn_offset) and
+ * write through the provider's own reg_write.  Everything else lands
+ * on the primary via ctrl->reg_{read,write}(), so AHB-parented
+ * (SLIMbus) platforms keep going through their regmap path unchanged.
+ */
+static int qcom_swrm_port_reg_write(struct qcom_swrm_ctrl *ctrl, u8 port_num,
+				    u32 reg, u32 val)
+{
+	u8 lane = ctrl->pconfig[port_num].lane_control;
+	struct qcom_swrm_ctrl *tgt = ctrl->sec_ctrl;
+
+	if (tgt && lane != SWR_INVALID_PARAM && lane >= ctrl->sec_first_lane &&
+	    lane < ctrl->sec_first_lane + ctrl->num_sec_lanes)
+		return tgt->reg_write(tgt, reg - ctrl->sec_dpn_offset, val);
+	return ctrl->reg_write(ctrl, reg, val);
+}
+
+static int qcom_swrm_port_reg_read(struct qcom_swrm_ctrl *ctrl, u8 port_num,
+				   u32 reg, u32 *val)
+{
+	u8 lane = ctrl->pconfig[port_num].lane_control;
+	struct qcom_swrm_ctrl *tgt = ctrl->sec_ctrl;
+
+	if (tgt && lane != SWR_INVALID_PARAM && lane >= ctrl->sec_first_lane &&
+	    lane < ctrl->sec_first_lane + ctrl->num_sec_lanes)
+		return tgt->reg_read(tgt, reg - ctrl->sec_dpn_offset, val);
+	return ctrl->reg_read(ctrl, reg, val);
 }
 
 static int qcom_swrm_port_params(struct sdw_bus *bus,
@@ -1077,8 +1137,9 @@ static int qcom_swrm_port_params(struct sdw_bus *bus,
 	struct qcom_swrm_ctrl *ctrl = to_qcom_sdw(bus);
 	u32 offset = ctrl->reg_layout[SWRM_OFFSET_DP_BLOCK_CTRL_1];
 
-	return ctrl->reg_write(ctrl, SWRM_DPn_BLOCK_CTRL_1(offset, p_params->num),
-				p_params->bps - 1);
+	return qcom_swrm_port_reg_write(ctrl, p_params->num,
+					SWRM_DPn_BLOCK_CTRL_1(offset, p_params->num),
+					p_params->bps - 1);
 }
 
 static int qcom_swrm_transport_params(struct sdw_bus *bus,
@@ -1099,7 +1160,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 	value |= pcfg->off2 << SWRM_DP_PORT_CTRL_OFFSET2_SHFT;
 	value |= pcfg->si & 0xff;
 
-	ret = ctrl->reg_write(ctrl, reg, value);
+	ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 	if (ret)
 		goto err;
 
@@ -1108,7 +1169,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 		value = (pcfg->si >> 8) & 0xff;
 		reg = SWRM_DPn_SAMPLECTRL2_BANK(offset, params->port_num, bank);
 
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 		if (ret)
 			goto err;
 	}
@@ -1117,8 +1178,17 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 		offset = ctrl->reg_layout[SWRM_OFFSET_DP_PORT_CTRL_2_BANK];
 		reg = SWRM_DPn_PORT_CTRL_2_BANK(offset, params->port_num, bank);
 
+		/*
+		 * DPn PORT_CTRL_2 selects the DATA pin in the target IP's
+		 * local numbering.  When the port lives on the secondary
+		 * IP, translate the bus-lane number to the secondary's
+		 * local lane (bus_lane - sec_first_lane).
+		 */
 		value = pcfg->lane_control;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		if (ctrl->sec_ctrl && value >= ctrl->sec_first_lane &&
+		    value < ctrl->sec_first_lane + ctrl->num_sec_lanes)
+			value -= ctrl->sec_first_lane;
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 		if (ret)
 			goto err;
 	}
@@ -1129,7 +1199,7 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 		reg = SWRM_DPn_BLOCK_CTRL2_BANK(offset, params->port_num, bank);
 
 		value = pcfg->blk_group_count;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 		if (ret)
 			goto err;
 	}
@@ -1139,10 +1209,10 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 
 	if (pcfg->hstart != SWR_INVALID_PARAM && pcfg->hstop != SWR_INVALID_PARAM) {
 		value = (pcfg->hstop << 4) | pcfg->hstart;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 	} else {
 		value = (SWR_HSTOP_MAX_VAL << 4) | SWR_HSTART_MIN_VAL;
-		ret = ctrl->reg_write(ctrl, reg, value);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg, value);
 	}
 
 	if (ret)
@@ -1151,7 +1221,8 @@ static int qcom_swrm_transport_params(struct sdw_bus *bus,
 	if (pcfg->bp_mode != SWR_INVALID_PARAM) {
 		offset = ctrl->reg_layout[SWRM_OFFSET_DP_BLOCK_CTRL3_BANK];
 		reg = SWRM_DPn_BLOCK_CTRL3_BANK(offset, params->port_num, bank);
-		ret = ctrl->reg_write(ctrl, reg, pcfg->bp_mode);
+		ret = qcom_swrm_port_reg_write(ctrl, params->port_num, reg,
+					       pcfg->bp_mode);
 	}
 
 err:
@@ -1185,7 +1256,7 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 
 	reg = SWRM_DPn_PORT_CTRL_BANK(offset, enable_ch->port_num, bank);
 
-	ctrl->reg_read(ctrl, reg, &val);
+	qcom_swrm_port_reg_read(ctrl, enable_ch->port_num, reg, &val);
 
 	if (enable_ch->enable) {
 		u8 ch_mask = ctrl->pconfig[enable_ch->port_num].ch_mask;
@@ -1211,14 +1282,14 @@ static int qcom_swrm_port_enable(struct sdw_bus *bus,
 	 * PCM data path in addition to the per-port enable register.
 	 */
 	if (qcom_swrm_port_is_pcm(bus, enable_ch->port_num)) {
-		ret = ctrl->reg_write(ctrl,
-				      SWRM_DP_PCM_PORT_CTRL(enable_ch->port_num),
-				      enable_ch->enable ? SWRM_DP_PCM_PORT_CTRL_EN : 0);
+		ret = qcom_swrm_port_reg_write(ctrl, enable_ch->port_num,
+				SWRM_DP_PCM_PORT_CTRL(enable_ch->port_num),
+				enable_ch->enable ? SWRM_DP_PCM_PORT_CTRL_EN : 0);
 		if (ret)
 			return ret;
 	}
 
-	return ctrl->reg_write(ctrl, reg, val);
+	return qcom_swrm_port_reg_write(ctrl, enable_ch->port_num, reg, val);
 }
 
 static const struct sdw_master_port_ops qcom_swrm_port_ops = {
@@ -1634,6 +1705,95 @@ static int swrm_reg_show(struct seq_file *s_file, void *data)
 DEFINE_SHOW_ATTRIBUTE(swrm_reg);
 #endif
 
+/*
+ * Parse "qcom,secondary-lanes" and stash the single secondary provider
+ * on ctrl->sec_ctrl.  All entries must reference the same provider IP
+ * and map to consecutive provider-local lanes starting at 0; the DPn
+ * dispatcher uses that shape to translate addresses with a single
+ * sec_dpn_offset.  If the referenced provider has not yet finished
+ * probing, return -EPROBE_DEFER so the platform framework retries.
+ */
+static int qcom_swrm_setup_secondary(struct qcom_swrm_ctrl *ctrl)
+{
+	unsigned int first_sec_port = 0;
+	int i;
+
+	for (i = 0; i < SDW_MAX_LANES - ctrl->num_lanes; i++) {
+		struct of_phandle_args args;
+		struct qcom_swrm_ctrl *provider_ctrl;
+		struct platform_device *pdev;
+		int ret;
+
+		ret = of_parse_phandle_with_args(ctrl->dev->of_node,
+						 "qcom,secondary-lanes",
+						 "#qcom,swrm-lane-cells",
+						 i, &args);
+		if (ret == -ENOENT)
+			break;
+		if (ret)
+			return ret;
+
+		pdev = of_find_device_by_node(args.np);
+		of_node_put(args.np);
+		if (!pdev)
+			return -EPROBE_DEFER;
+
+		provider_ctrl = platform_get_drvdata(pdev);
+		put_device(&pdev->dev);
+		if (!provider_ctrl || !provider_ctrl->lane_provider_ready)
+			return -EPROBE_DEFER;
+
+		if (args.args_count < 1 ||
+		    args.args[0] >= provider_ctrl->num_lanes)
+			return -EINVAL;
+
+		/*
+		 * Enforce the single-provider + monotonic-order shape.
+		 * The N-th DT entry must reference the same provider as
+		 * the first, and must carry provider-local lane index N.
+		 */
+		if (i == 0) {
+			ctrl->sec_ctrl = provider_ctrl;
+			provider_ctrl->primary_ctrl = ctrl;
+			ctrl->sec_first_lane = ctrl->num_lanes;
+		} else if (ctrl->sec_ctrl != provider_ctrl) {
+			dev_err(ctrl->dev,
+				"qcom,secondary-lanes: multiple providers not supported\n");
+			return -EINVAL;
+		}
+		if (args.args[0] != i) {
+			dev_err(ctrl->dev,
+				"qcom,secondary-lanes entry %d: expected local lane %d, got %u\n",
+				i, i, args.args[0]);
+			return -EINVAL;
+		}
+		ctrl->num_sec_lanes++;
+	}
+	if (!ctrl->num_sec_lanes)
+		return 0;
+
+	/*
+	 * Compute sec_dpn_offset from the first port whose lane_control
+	 * lands on our secondary window: the DPn dispatchers use this as
+	 * a constant delta so consecutive secondary-owned ports map to
+	 * consecutive provider DPn slots starting at slot 1.
+	 */
+	for (i = 1; i <= ctrl->nports; i++) {
+		u8 l = ctrl->pconfig[i].lane_control;
+
+		if (l == SWR_INVALID_PARAM)
+			continue;
+		if (l >= ctrl->sec_first_lane &&
+		    l < ctrl->sec_first_lane + ctrl->num_sec_lanes) {
+			first_sec_port = i;
+			break;
+		}
+	}
+	if (first_sec_port)
+		ctrl->sec_dpn_offset = (first_sec_port - 1) * SWRM_DPn_SLOT_STRIDE;
+	return 0;
+}
+
 static int qcom_swrm_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1716,6 +1876,13 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_clk;
 
+	if (of_property_present(dev->of_node, "qcom,secondary-lanes")) {
+		ret = qcom_swrm_setup_secondary(ctrl);
+		if (ret)
+			goto err_clk;
+		ctrl->is_primary = true;
+	}
+
 	params = &ctrl->bus.params;
 	params->max_dr_freq = DEFAULT_CLK_FREQ;
 	params->curr_dr_freq = DEFAULT_CLK_FREQ;
@@ -1786,7 +1953,11 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		return 0;
 	}
 
+	if (ctrl->is_primary && ctrl->sec_ctrl)
+		qcom_swrm_init(ctrl->sec_ctrl);
+
 	qcom_swrm_init(ctrl);
+
 	wait_for_completion_timeout(&ctrl->enumeration,
 				    msecs_to_jiffies(TIMEOUT_MS));
 	ret = qcom_swrm_register_dais(ctrl);
