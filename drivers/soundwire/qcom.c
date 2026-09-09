@@ -106,6 +106,9 @@
 #define SWRM_MCP_FRAME_CTRL_BANK_ADDR(m)		(0x101C + 0x40 * (m))
 #define SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK			GENMASK(2, 0)
 #define SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK			GENMASK(7, 3)
+#define SWRM_MCP_FRAME_CTRL_BANK_CLK_DIV_BMSK			GENMASK(10, 8)
+#define SWRM_MCP_FRAME_CTRL_BANK_SSP_PERIOD_BMSK		GENMASK(23, 16)
+#define SWRM_SSP_PERIOD(rows, cols)	(19200000 / ((rows) * (cols) * 4000) - 1)
 #define SWRM_MCP_BUS_CTRL					0x1044
 #define SWRM_MCP_BUS_CLK_START					BIT(1)
 #define SWRM_MCP_CFG_ADDR					0x1048
@@ -985,10 +988,16 @@ static int qcom_swrm_init(struct qcom_swrm_ctrl *ctrl)
 	/* Clear Rows and Cols */
 	val = FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK, ctrl->rows_index);
 	val |= FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_COL_CTRL_BMSK, ctrl->cols_index);
+	if (ctrl->is_primary)
+		val |= FIELD_PREP(SWRM_MCP_FRAME_CTRL_BANK_SSP_PERIOD_BMSK,
+				  SWRM_SSP_PERIOD(ctrl->bus.params.row,
+						  ctrl->bus.params.col));
 
 	reset_control_reset(ctrl->audio_cgcr);
 
 	ctrl->reg_write(ctrl, SWRM_MCP_FRAME_CTRL_BANK_ADDR(0), val);
+	if (ctrl->is_primary)
+		ctrl->reg_write(ctrl, SWRM_MCP_FRAME_CTRL_BANK_ADDR(1), val);
 
 	/* Enable Auto enumeration */
 	ctrl->reg_write(ctrl, SWRM_ENUMERATOR_CFG_ADDR, 1);
@@ -1138,11 +1147,20 @@ static int qcom_swrm_pre_bank_switch(struct sdw_bus *bus)
 	u32p_replace_bits(&val, ctrl->rows_index, SWRM_MCP_FRAME_CTRL_BANK_ROW_CTRL_BMSK);
 
 	/*
-	 * Mirror FRAME_CTRL_BANK to the secondary so its frame generator
-	 * stays in sync with ours across bank switches.
+	 * Mirror rows/cols to the secondary first (no SSP_PERIOD — that
+	 * lives on the primary only), then set SSP_PERIOD and write the
+	 * primary bank.
 	 */
 	if (ctrl->sec_ctrl)
 		ctrl->sec_ctrl->reg_write(ctrl->sec_ctrl, reg, val);
+
+	if (ctrl->is_primary) {
+		u32p_replace_bits(&val, 0,
+				  SWRM_MCP_FRAME_CTRL_BANK_CLK_DIV_BMSK);
+		u32p_replace_bits(&val,
+				  SWRM_SSP_PERIOD(bus->params.row, bus->params.col),
+				  SWRM_MCP_FRAME_CTRL_BANK_SSP_PERIOD_BMSK);
+	}
 
 	return ctrl->reg_write(ctrl, reg, val);
 }
