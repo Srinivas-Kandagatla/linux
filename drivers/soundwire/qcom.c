@@ -187,6 +187,13 @@ enum {
 	SWRM_OFFSET_DP_SAMPLECTRL2_BANK,
 };
 
+/*
+ * Default number of DATA lanes for a Qualcomm SWR master IP when the
+ * optional "num-lanes" DT property is absent.  Every IP shipping today
+ * exposes two (DATA0, DATA1); DT may override for future IPs.
+ */
+#define QCOM_SWRM_DEFAULT_DATA_LANES	2
+
 struct qcom_swrm_ctrl {
 	struct sdw_bus bus;
 	struct device *dev;
@@ -195,6 +202,23 @@ struct qcom_swrm_ctrl {
 	const unsigned int *reg_layout;
 	void __iomem *mmio;
 	struct reset_control *audio_cgcr;
+	/*
+	 * Number of DATA lanes this IP exposes in its own local
+	 * numbering.  Read from the optional "num-lanes" DT property
+	 * (defaults to 2, matches every Qualcomm SWR master shipping
+	 * so far).
+	 */
+	u8 num_lanes;
+	/*
+	 * Lane-provider role: true once the provider probe has fully
+	 * initialised this IP as a data-only lane source.  Consumers
+	 * look this device up via of_find_device_by_node() +
+	 * platform_get_drvdata() and gate on lane_provider_ready to
+	 * decide whether to defer.  Set only after qcom_swrm_init() has
+	 * brought the frame generator up.
+	 */
+	bool lane_provider_ready;
+	bool is_secondary;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
@@ -1624,6 +1648,10 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	if (!ctrl)
 		return -ENOMEM;
 
+	ctrl->num_lanes = QCOM_SWRM_DEFAULT_DATA_LANES;
+	if (!of_property_read_u32(dev->of_node, "num-lanes", &val))
+		ctrl->num_lanes = val;
+
 	memset(ctrl->page1_cache, 0xff, sizeof(ctrl->page1_cache));
 	memset(ctrl->page2_cache, 0xff, sizeof(ctrl->page2_cache));
 
@@ -1737,11 +1765,25 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		ctrl->bus.controller_id = val;
 	}
 
-	ret = sdw_bus_master_add(&ctrl->bus, dev, dev->fwnode);
-	if (ret) {
-		dev_err(dev, "Failed to register Soundwire controller (%d)\n",
-			ret);
-		goto err_clk;
+	if (of_property_present(dev->of_node, "#qcom,swrm-lane-cells")) {
+		ctrl->is_secondary = true;
+	} else {
+		ret = sdw_bus_master_add(&ctrl->bus, dev, dev->fwnode);
+		if (ret) {
+			dev_err(dev, "Failed to register Soundwire controller (%d)\n",
+				ret);
+			goto err_clk;
+		}
+	}
+
+	if (ctrl->is_secondary) {
+		ctrl->lane_provider_ready = true;
+		dev_dbg(dev,
+			"Qualcomm SoundWire lane provider v%x.%x.%x registered (%u lanes)\n",
+			(ctrl->version >> 24) & 0xff,
+			(ctrl->version >> 16) & 0xff,
+			ctrl->version & 0xffff, ctrl->num_lanes);
+		return 0;
 	}
 
 	qcom_swrm_init(ctrl);
@@ -1781,7 +1823,8 @@ static void qcom_swrm_remove(struct platform_device *pdev)
 {
 	struct qcom_swrm_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
 
-	sdw_bus_master_delete(&ctrl->bus);
+	if (!ctrl->lane_provider_ready)
+		sdw_bus_master_delete(&ctrl->bus);
 	clk_disable_unprepare(ctrl->hclk);
 }
 
