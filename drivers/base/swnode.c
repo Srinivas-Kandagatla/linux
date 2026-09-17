@@ -1190,6 +1190,7 @@ void software_node_notify(struct device *dev)
 void software_node_notify_remove(struct device *dev)
 {
 	struct swnode *swnode;
+	bool managed, is_owner;
 
 	swnode = dev_to_swnode(dev);
 	if (!swnode)
@@ -1197,6 +1198,23 @@ void software_node_notify_remove(struct device *dev)
 
 	sysfs_remove_link(&swnode->kobj, dev_name(dev));
 	sysfs_remove_link(&dev->kobj, "software_node");
+
+	/*
+	 * Only the device that owns the swnode should tear down the managed
+	 * lifecycle. Other devices can reach the same swnode via dev_to_swnode()
+	 * — for instance a USB root hub reuses its parent controller's of_node
+	 * (device_set_of_node_from_dev()) and the swnode is reached through the
+	 * of_fwnode's secondary chain. Doing the two-put managed cleanup for
+	 * those non-owner devices drains references and eventually underflows
+	 * the swnode kobject refcount when the real owner is unregistered.
+	 *
+	 * Sample managed/ownership before the first put: that put may drop
+	 * the last reference and free the swnode, turning subsequent reads
+	 * into use-after-free.
+	 */
+	is_owner = device_match_fwnode(dev, &swnode->fwnode) ||
+		   swnode->fwnode.dev == dev;
+	managed = swnode->managed;
 
 	/*
 	 * Drop the device pointer mirrored onto a secondary software node in
@@ -1208,7 +1226,7 @@ void software_node_notify_remove(struct device *dev)
 
 	swnode_put(swnode);
 
-	if (swnode->managed) {
+	if (managed && is_owner) {
 		set_secondary_fwnode(dev, NULL);
 		swnode_put(swnode);
 	}
