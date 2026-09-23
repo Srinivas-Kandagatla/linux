@@ -79,9 +79,14 @@ static int x1e80100_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 							  SNDRV_PCM_HW_PARAM_CHANNELS);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
 
-	rate->min = rate->max = 48000;
-	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
-	channels->min = channels->max = 2;
+	if (cpu_dai->id == WSA_CODEC_DMA_TX_0) {
+		rate->min = rate->max = 8000;
+	} else {
+		rate->min = rate->max = 48000;
+		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+		channels->min = channels->max = 2;
+	}
+
 	switch (cpu_dai->id) {
 	case TX_CODEC_DMA_TX_0:
 	case TX_CODEC_DMA_TX_1:
