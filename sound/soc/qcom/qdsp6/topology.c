@@ -358,22 +358,57 @@ audioreach_get_module_priv_data(const struct snd_soc_tplg_private *private)
 
 	for (sz = 0; sz < le32_to_cpu(private->size); ) {
 		const struct snd_soc_tplg_vendor_array *mod_array;
+		u32 array_size;
 
 		mod_array = (struct snd_soc_tplg_vendor_array *)((u8 *)private->array + sz);
+		array_size = le32_to_cpu(mod_array->size);
+
 		if (le32_to_cpu(mod_array->type) == SND_SOC_AR_TPLG_MODULE_CFG_TYPE) {
 			struct audioreach_module_priv_data *pdata;
+			u32 nwords;
 
-			pdata = kzalloc_flex(*pdata, data,
-					     le32_to_cpu(mod_array->size));
+			/*
+			 * For a cfg blob this array is really a
+			 * struct audioreach_module_priv_data: the size and type
+			 * words are shared with the vendor array header, and
+			 * size counts the bytes of data[] that follow the 16
+			 * byte header. data[] is __le32, so the flex array
+			 * element count is a quarter of it. Passing the byte
+			 * count straight to kzalloc_flex()/struct_size() made
+			 * both the allocation and the copy four times too
+			 * large, and the copy then ran off the end of the
+			 * firmware buffer into unmapped pages.
+			 */
+			nwords = array_size / sizeof(__le32);
+
+			/*
+			 * size comes from the topology file, so check the whole
+			 * header plus payload really lies inside the private
+			 * data before copying it out. Written as an addition on
+			 * u64 so a hostile size cannot wrap the comparison.
+			 */
+			if (sizeof(*pdata) + (u64)array_size >
+			    le32_to_cpu(private->size) - sz)
+				return ERR_PTR(-EINVAL);
+
+			pdata = kzalloc_flex(*pdata, data, nwords);
 			if (!pdata)
 				return ERR_PTR(-ENOMEM);
 
-			memcpy(pdata, ((u8 *)private->data + sz), struct_size(pdata, data,
-						le32_to_cpu(mod_array->size)));
+			memcpy(pdata, ((u8 *)private->data + sz),
+			       struct_size(pdata, data, nwords));
 			return pdata;
 		}
 
-		sz = sz + le32_to_cpu(mod_array->size);
+		/*
+		 * Only reached for arrays this function does not consume, so
+		 * the size is not otherwise validated here. Guard the advance
+		 * anyway: a zero size would spin the loop forever.
+		 */
+		if (!array_size)
+			return ERR_PTR(-EINVAL);
+
+		sz = sz + array_size;
 	}
 
 	return NULL;
@@ -738,6 +773,17 @@ static int audioreach_widget_load_module_common(struct snd_soc_component *compon
 		return mod ? PTR_ERR(mod) : -ENODEV;
 
 	mod->data = audioreach_get_module_priv_data(&tplg_w->priv);
+	if (IS_ERR(mod->data)) {
+		int rc = PTR_ERR(mod->data);
+
+		/*
+		 * NULL is the valid "this module has no cfg blob" case; an
+		 * error pointer must not be left in mod->data for the graph
+		 * open path to dereference later.
+		 */
+		mod->data = NULL;
+		return rc;
+	}
 
 	dobj = &w->dobj;
 	dobj->private = mod;
