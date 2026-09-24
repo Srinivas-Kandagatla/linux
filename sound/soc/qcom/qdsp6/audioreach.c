@@ -1866,6 +1866,135 @@ static int audioreach_speaker_protection_vi(struct q6apm_graph *graph,
 	return rc;
 }
 
+/*
+ * The DSP rejects a SET_CFG that is larger than its command buffer, so a blob
+ * holding many parameters has to be split. Keep the chunks well under any
+ * plausible limit rather than probing for it.
+ */
+#define AR_SP_CFG_MAX_CHUNK_BYTES	512
+
+static int audioreach_speaker_protection_send_chunk(struct q6apm_graph *graph,
+						    const char *tag,
+						    const void *data, int size,
+						    int chunk_idx)
+{
+	int rc;
+
+	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(size, APM_CMD_SET_CFG, 0);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, data, size);
+
+	rc = q6apm_send_cmd_sync(graph->apm, pkt, 0);
+	if (rc)
+		dev_err(graph->dev, "%s cfg blob: chunk %d (%d bytes) failed: %d\n",
+			tag, chunk_idx, size, rc);
+	else
+		dev_dbg(graph->dev, "%s cfg blob: chunk %d (%d bytes) sent\n",
+			tag, chunk_idx, size);
+
+	return rc;
+}
+
+/*
+ * Copy one parameter to @dst with its payload padded out to the 8 byte
+ * alignment the DSP expects between parameters, which the blob in the topology
+ * is not required to have. Returns the number of bytes written.
+ */
+static int audioreach_speaker_protection_pack_record(u8 *dst, const uint32_t *rec)
+{
+	uint32_t param_size = rec[2];
+	int padded_payload = ALIGN(param_size, 8);
+
+	memcpy(dst, rec, APM_MODULE_PARAM_DATA_SIZE);
+	memset(dst + APM_MODULE_PARAM_DATA_SIZE, 0, padded_payload);
+	memcpy(dst + APM_MODULE_PARAM_DATA_SIZE,
+	       (const u8 *)rec + APM_MODULE_PARAM_DATA_SIZE, param_size);
+
+	return APM_MODULE_PARAM_DATA_SIZE + padded_payload;
+}
+
+static int audioreach_speaker_protection_send_static_cfg(struct q6apm_graph *graph,
+							 const struct audioreach_module *module,
+							 const char *tag)
+{
+	int size, num_words, i, num_boundaries = 0;
+	const uint32_t *word;
+	int rc = 0;
+
+	if (!module->data || !module->data->size)
+		return 0;
+
+	size = le32_to_cpu(module->data->size);
+	num_words = size / sizeof(uint32_t);
+
+	const void *blob = module->data->data;
+
+	int *boundary __free(kfree) = kmalloc_array(num_words, sizeof(*boundary), GFP_KERNEL);
+	if (!boundary)
+		return -ENOMEM;
+
+	/*
+	 * Each parameter in the blob starts with the instance id of the module
+	 * it belongs to, so that is where the records begin.
+	 */
+	word = blob;
+	for (i = 0; i < num_words; i++)
+		if (word[i] == module->instance_id)
+			boundary[num_boundaries++] = i;
+
+	dev_dbg(graph->dev,
+		"%s cfg blob: size=%d bytes, %d records for iid 0x%x\n",
+		tag, size, num_boundaries, module->instance_id);
+
+	/* Nothing recognisable to split on, so send it as the topology built it. */
+	if (!num_boundaries)
+		return audioreach_speaker_protection_send_chunk(graph, tag, blob, size, 0);
+
+	/* Padding can only grow a record, by at most 7 bytes. */
+	u8 *packed __free(kfree) = kmalloc(size + num_boundaries * 7, GFP_KERNEL);
+	if (!packed)
+		return -ENOMEM;
+
+	for (i = 0; i < num_boundaries && !rc; ) {
+		int chunk_bytes = 0;
+		int j = i;
+
+		/* Fill a chunk, but never split a single record across two. */
+		while (j < num_boundaries) {
+			const uint32_t *rec = (const uint32_t *)((const u8 *)blob +
+								 boundary[j] * sizeof(uint32_t));
+			int rec_packed_bytes = APM_MODULE_PARAM_DATA_SIZE + ALIGN(rec[2], 8);
+
+			if (j > i && chunk_bytes + rec_packed_bytes > AR_SP_CFG_MAX_CHUNK_BYTES)
+				break;
+
+			chunk_bytes += audioreach_speaker_protection_pack_record(packed +
+										chunk_bytes,
+										rec);
+			j++;
+		}
+
+		rc = audioreach_speaker_protection_send_chunk(graph, tag, packed, chunk_bytes, i);
+		i = j;
+	}
+
+	return rc;
+}
+
+static int audioreach_speaker_protection_static_cfg(struct q6apm_graph *graph,
+						    const struct audioreach_module *module)
+{
+	return audioreach_speaker_protection_send_static_cfg(graph, module, "SP");
+}
+
+static int audioreach_speaker_protection_vi_static_cfg(struct q6apm_graph *graph,
+						       const struct audioreach_module *module)
+{
+	return audioreach_speaker_protection_send_static_cfg(graph, module, "VI");
+}
+
 int audioreach_set_media_format(struct q6apm_graph *graph,
 				const struct audioreach_module *module,
 				const struct audioreach_module_config *cfg)
@@ -1920,11 +2049,15 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 	case MODULE_ID_SPEAKER_PROTECTION:
 		rc = audioreach_speaker_protection(graph, module);
 		if (!rc)
+			rc = audioreach_speaker_protection_static_cfg(graph, module);
+		if (!rc)
 			rc = audioreach_module_enable(graph, module, true);
 
 		break;
 	case MODULE_ID_SPEAKER_PROTECTION_VI:
 		rc = audioreach_speaker_protection_vi(graph, module, cfg);
+		if (!rc)
+			rc = audioreach_speaker_protection_vi_static_cfg(graph, module);
 		if (!rc)
 			rc = audioreach_module_enable(graph, module, true);
 
