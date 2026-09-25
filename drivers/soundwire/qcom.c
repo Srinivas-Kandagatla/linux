@@ -1601,9 +1601,12 @@ static int qcom_swrm_get_port_config(struct qcom_swrm_ctrl *ctrl)
 	int i, ret, val;
 
 	ctrl->reg_read(ctrl, SWRM_COMP_PARAMS, &val);
+	dev_info(ctrl->dev, "SWRM_COMP_PARAMS=0x%08x\n", val);
 
 	ctrl->num_dout_ports = FIELD_GET(SWRM_COMP_PARAMS_DOUT_PORTS_MASK, val);
 	ctrl->num_din_ports = FIELD_GET(SWRM_COMP_PARAMS_DIN_PORTS_MASK, val);
+	dev_info(ctrl->dev, "HW ports: dout=%u din=%u\n",
+		 ctrl->num_dout_ports, ctrl->num_din_ports);
 
 	ret = of_property_read_u32(np, "qcom,din-ports", &val);
 	if (!ret) { /* only if present */
@@ -1639,17 +1642,23 @@ static int qcom_swrm_get_port_config(struct qcom_swrm_ctrl *ctrl)
 
 		ret = of_property_read_u8_index(np, "qcom,ports-offset1", i, &pcfg->off1);
 		if (ret)
-			return ret;
+			return dev_err_probe(ctrl->dev, ret,
+					     "qcom,ports-offset1[%d] missing (nports=%d)\n",
+					     i, ctrl->nports);
 
 		ret = of_property_read_u8_index(np, "qcom,ports-offset2", i, &pcfg->off2);
 		if (ret)
-			return ret;
+			return dev_err_probe(ctrl->dev, ret,
+					     "qcom,ports-offset2[%d] missing (nports=%d)\n",
+					     i, ctrl->nports);
 
 		ret = of_property_read_u8_index(np, "qcom,ports-sinterval-low", i, (u8 *)&pcfg->si);
 		if (ret) {
 			ret = of_property_read_u16_index(np, "qcom,ports-sinterval", i, &pcfg->si);
 			if (ret)
-				return ret;
+				return dev_err_probe(ctrl->dev, ret,
+						     "qcom,ports-sinterval[%d] missing (nports=%d)\n",
+						     i, ctrl->nports);
 		}
 
 		ret = of_property_read_u8_index(np, "qcom,ports-block-pack-mode",
@@ -1658,7 +1667,9 @@ static int qcom_swrm_get_port_config(struct qcom_swrm_ctrl *ctrl)
 			if (ctrl->version <= SWRM_VERSION_1_3_0)
 				pcfg->bp_mode = SWR_INVALID_PARAM;
 			else
-				return ret;
+				return dev_err_probe(ctrl->dev, ret,
+						     "qcom,ports-block-pack-mode[%d] missing (nports=%d)\n",
+						     i, ctrl->nports);
 		}
 
 		/* Optional properties */
@@ -1726,41 +1737,59 @@ static int qcom_swrm_multi_master_setup(struct qcom_swrm_ctrl *ctrl)
 					       "qcom,multi-master-peer",
 					       1, 0, &args);
 	if (ret)
-		return -EINVAL;
+		return dev_err_probe(ctrl->dev, -EINVAL,
+				     "qcom,multi-master-peer parse failed (%d)\n", ret);
 
 	pdev = of_find_device_by_node(args.np);
 	of_node_put(args.np);
-	if (!pdev)
+	if (!pdev) {
+		dev_dbg(ctrl->dev, "multi-master peer pdev not yet created, defer\n");
 		return -EPROBE_DEFER;
+	}
+
+	if (!pdev->dev.driver) {
+		dev_dbg(ctrl->dev, "multi-master peer not yet bound, defer\n");
+		ret = -EPROBE_DEFER;
+		goto out;
+	}
 
 	if (pdev->dev.driver != ctrl->dev->driver) {
-		ret = -EINVAL;
+		ret = dev_err_probe(ctrl->dev, -EINVAL,
+				    "multi-master peer bound to different driver (%s)\n",
+				    pdev->dev.driver->name);
 		goto out;
 	}
 
 	peer = platform_get_drvdata(pdev);
 	if (!peer || !peer->is_dependent) {
+		dev_dbg(ctrl->dev,
+			"multi-master peer not ready (peer=%p is_dependent=%d), defer\n",
+			peer, peer ? peer->is_dependent : -1);
 		ret = -EPROBE_DEFER;
 		goto out;
 	}
 
 	if (!ctrl->num_lanes || !peer->num_lanes ||
 	    ctrl->num_lanes + peer->num_lanes > SDW_MAX_LANES) {
-		ret = -EINVAL;
+		ret = dev_err_probe(ctrl->dev, -EINVAL,
+				    "invalid lane count: self=%u peer=%u max=%u\n",
+				    ctrl->num_lanes, peer->num_lanes, SDW_MAX_LANES);
 		goto out;
 	}
 
 	offset = args.args[0];
 	if (offset < ctrl->num_lanes) {
-		dev_err(ctrl->dev, "qcom,multi-master-peer: offset %u < num-lanes %u\n",
-			offset, ctrl->num_lanes);
-		ret = -EINVAL;
+		ret = dev_err_probe(ctrl->dev, -EINVAL,
+				    "qcom,multi-master-peer: offset %u < num-lanes %u\n",
+				    offset, ctrl->num_lanes);
 		goto out;
 	}
 
 	if (!device_link_add(ctrl->dev, &pdev->dev,
 			     DL_FLAG_AUTOREMOVE_CONSUMER | DL_FLAG_PM_RUNTIME)) {
-		ret = -EINVAL;
+		ret = dev_err_probe(ctrl->dev, -EINVAL,
+				    "device_link_add(consumer=%s, supplier=%s) failed\n",
+				    dev_name(ctrl->dev), dev_name(&pdev->dev));
 		goto out;
 	}
 
@@ -1769,6 +1798,10 @@ static int qcom_swrm_multi_master_setup(struct qcom_swrm_ctrl *ctrl)
 	ctrl->peer_first_lane = ctrl->num_lanes;
 	ctrl->num_peer_lanes = peer->num_lanes;
 	ctrl->peer_dpn_offset = offset * SWRM_DPn_SLOT_STRIDE;
+
+	dev_info(ctrl->dev,
+		 "multi-master primary linked to peer %s (self_lanes=%u peer_lanes=%u offset=%u)\n",
+		 dev_name(&pdev->dev), ctrl->num_lanes, peer->num_lanes, offset);
 
 	ret = 0;
 out:
@@ -1856,14 +1889,18 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 	if (of_property_match_string(dev->of_node, "qcom,multi-master-mode",
 				     "dependent") < 0) {
 		ret = qcom_swrm_get_port_config(ctrl);
-		if (ret)
+		if (ret) {
+			dev_err_probe(dev, ret, "qcom_swrm_get_port_config failed\n");
 			goto err_clk;
+		}
 	}
 
 	if (of_property_match_string(dev->of_node, "qcom,multi-master-mode", "primary") >= 0) {
 		ret = qcom_swrm_multi_master_setup(ctrl);
-		if (ret)
+		if (ret) {
+			dev_err_probe(dev, ret, "qcom_swrm_multi_master_setup failed\n");
 			goto err_clk;
+		}
 		ctrl->is_primary = true;
 	}
 
