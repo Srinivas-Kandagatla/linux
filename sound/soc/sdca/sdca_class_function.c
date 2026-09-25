@@ -336,8 +336,8 @@ static int class_function_probe(struct auxiliary_device *auxdev,
 				const struct auxiliary_device_id *aux_dev_id)
 {
 	struct device *dev = &auxdev->dev;
-	struct sdca_class_drv *core = dev_get_drvdata(dev->parent);
 	struct sdca_dev *sdev = auxiliary_dev_to_sdca_dev(auxdev);
+	struct sdca_class_drv *core = sdev->core;
 	struct snd_soc_component_driver *cmp_drv;
 	struct snd_soc_dai_driver *dais;
 	struct class_function_drv *drv;

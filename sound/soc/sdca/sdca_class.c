@@ -116,7 +116,7 @@ static void class_boot_work(struct work_struct *work)
 	if (IS_ERR(drv->irq_info))
 		goto err;
 
-	ret = sdca_dev_register_functions(drv->sdw);
+	ret = sdca_dev_register_functions(drv->sdw, drv);
 	if (ret)
 		goto err;
 

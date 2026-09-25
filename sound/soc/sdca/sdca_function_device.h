@@ -4,9 +4,12 @@
 #ifndef __SDCA_FUNCTION_DEVICE_H
 #define __SDCA_FUNCTION_DEVICE_H
 
+struct sdca_class_drv;
+
 struct sdca_dev {
 	struct auxiliary_device auxdev;
 	struct sdca_function_data function;
+	struct sdca_class_drv *core;
 };
 
 #define auxiliary_dev_to_sdca_dev(auxiliary_dev)		\

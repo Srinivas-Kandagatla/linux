@@ -60,11 +60,13 @@ enum sdca_quirk {
 	SDCA_QUIRKS_SKIP_FUNC_TYPE_PATCHING,
 };
 
+struct sdca_class_drv;
+
 #if IS_ENABLED(CONFIG_SND_SOC_SDCA)
 
 void sdca_lookup_swft(struct sdw_slave *slave);
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
-int sdca_dev_register_functions(struct sdw_slave *slave);
+int sdca_dev_register_functions(struct sdw_slave *slave, struct sdca_class_drv *core);
 void sdca_dev_unregister_functions(struct sdw_slave *slave);
 
 #else
@@ -75,7 +77,8 @@ static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_qu
 	return false;
 }
 
-static inline int sdca_dev_register_functions(struct sdw_slave *slave)
+static inline int sdca_dev_register_functions(struct sdw_slave *slave,
+					      struct sdca_class_drv *core)
 {
 	return 0;
 }
