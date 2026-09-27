@@ -125,13 +125,17 @@ static int x1e80100_snd_prepare(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct x1e80100_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
-	unsigned int channels = substream->runtime->channels;
 	unsigned int rx_slot[4];
 	int ret;
 
 	switch (cpu_dai->id) {
 	case WSA_CODEC_DMA_RX_0:
-	case WSA_CODEC_DMA_RX_1:
+	case WSA_CODEC_DMA_RX_1: {
+		unsigned int channels;
+
+		if (!substream->runtime)
+			break;
+		channels = substream->runtime->channels;
 		ret = x1e80100_snd_hw_map_channels(rx_slot, channels);
 		if (ret)
 			return ret;
@@ -141,6 +145,7 @@ static int x1e80100_snd_prepare(struct snd_pcm_substream *substream)
 		if (ret)
 			return ret;
 		break;
+	}
 	default:
 		break;
 	}
