@@ -784,9 +784,17 @@ static int q6apm_dai_compr_trigger(struct snd_soc_component *component,
 		prtd->next_track = true;
 		break;
 	case SND_COMPR_TRIGGER_DRAIN:
-	case SND_COMPR_TRIGGER_PARTIAL_DRAIN:
-		prtd->notify_on_drain = true;
+	case SND_COMPR_TRIGGER_PARTIAL_DRAIN: {
+		bool send_eos_now;
+
+		scoped_guard(spinlock_irqsave, &prtd->lock) {
+			prtd->notify_on_drain = true;
+			send_eos_now = (prtd->bytes_received == prtd->bytes_sent);
+		}
+		if (send_eos_now)
+			audioreach_shared_memory_send_eos(prtd->graph);
 		break;
+	}
 	default:
 		ret = -EINVAL;
 		break;
