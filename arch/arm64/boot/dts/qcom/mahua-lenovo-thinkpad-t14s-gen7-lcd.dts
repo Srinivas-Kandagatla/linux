@@ -172,8 +172,9 @@
 	};
 
 	backlight: backlight {
-		compatible = "gpio-backlight";
-		gpios = <&tlmm 18 GPIO_ACTIVE_HIGH>;
+		compatible = "pwm-backlight";
+		pwms = <&pmk8850_pwm 0 4266537>;
+		enable-gpios = <&tlmm 18 GPIO_ACTIVE_HIGH>;
 		power-supply = <&vreg_edp_bl>;
 
 		pinctrl-0 = <&edp_bl_en>;
@@ -955,6 +956,10 @@
 		power-source = <1>; /* 1.8 V */
 		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
 	};
+};
+
+&pmk8850_pwm {
+	status = "okay";
 };
 
 &pmk8850_rtc {
