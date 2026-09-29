@@ -20,7 +20,6 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/firmware/qcom/qcom_scm.h>
-#include <linux/iommu.h>
 #include <uapi/misc/fastrpc.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/bitfield.h>
@@ -53,9 +52,6 @@
 #define FASTRPC_CTXID_SEQ_SHIFT	16
 #define FASTRPC_CTXID_SEQ_MASK	GENMASK_ULL(63, 16)
 
-/* Map the DMA handle in the invoke call for backward compatibility */
-#define FASTRPC_MAP_DMA_HANDLE  0x20000
-
 /*
  * Newer DSP firmware implements a PD (Protection Domain) notification
  * framework that sends PD state notifications upon request. The PD exit
@@ -83,11 +79,6 @@
 /* MAX NUMBER of DSP ATTRIBUTES SUPPORTED */
 #define FASTRPC_MAX_DSP_ATTRIBUTES (256)
 #define FASTRPC_MAX_DSP_ATTRIBUTES_LEN (sizeof(u32) * FASTRPC_MAX_DSP_ATTRIBUTES)
-
-/* Check if the given flag is used for extended UDMA mapping */
-#define IS_EXTENDED_MAP_FLAG(flag) \
-	((flag) == FASTRPC_MAP_FD_EXTENDED || \
-	 (flag) == FASTRPC_MAP_FD_DELAYED_EXTENDED)
 
 /* Retrives number of input buffers from the scalars parameter */
 #define REMOTE_SCALARS_INBUFS(sc)	(((sc) >> 16) & 0x0ff)
@@ -260,7 +251,6 @@ struct fastrpc_map {
 	u64 len;
 	u64 raddr;
 	u32 attr;
-	u32 flags;
 	struct kref refcount;
 };
 
@@ -335,8 +325,6 @@ struct fastrpc_channel_ctx {
 	bool secure;
 	bool unsigned_support;
 	bool poll_mode_supported;
-	/* Remoteproc has its own IOMMU; use iommu_map instead of qcom_scm_assign_mem. */
-	bool has_iommu;
 	/* Per-channel sequence counter; incremented on every context allocation */
 	atomic_t ctx_seq;
 	u64 dma_mask;
@@ -947,19 +935,16 @@ static const struct dma_buf_ops fastrpc_dma_buf_ops = {
 	.release = fastrpc_release,
 };
 
-static dma_addr_t fastrpc_compute_dma_addr(struct fastrpc_user *fl, dma_addr_t sg_dma_addr,
-					   struct fastrpc_session_ctx *sess)
+static dma_addr_t fastrpc_compute_dma_addr(struct fastrpc_user *fl, dma_addr_t sg_dma_addr)
 {
-	return sg_dma_addr + fastrpc_sid_offset(fl->cctx, sess);
+	return sg_dma_addr + fastrpc_sid_offset(fl->cctx, fl->sctx);
 }
 
-static int fastrpc_map_attach_to_dev(struct fastrpc_user *fl, int fd,
-				     u64 len, u32 attr,
-				     struct fastrpc_session_ctx *sess,
-				     struct fastrpc_map **ppmap, int mflags)
+static int fastrpc_map_attach(struct fastrpc_user *fl, int fd,
+			      u64 len, u32 attr, struct fastrpc_map **ppmap)
 {
+	struct fastrpc_session_ctx *sess = fl->sctx;
 	struct fastrpc_map *map = NULL;
-	struct device *dev = sess->dev;
 	struct sg_table *table;
 	struct scatterlist *sgl = NULL;
 	int err = 0, sgl_index = 0;
@@ -973,16 +958,15 @@ static int fastrpc_map_attach_to_dev(struct fastrpc_user *fl, int fd,
 
 	map->fl = fl;
 	map->fd = fd;
-	map->flags = mflags;
 	map->buf = dma_buf_get(fd);
 	if (IS_ERR(map->buf)) {
 		err = PTR_ERR(map->buf);
 		goto get_err;
 	}
 
-	map->attach = dma_buf_attach(map->buf, dev);
+	map->attach = dma_buf_attach(map->buf, sess->dev);
 	if (IS_ERR(map->attach)) {
-		dev_err(dev, "Failed to attach dmabuf\n");
+		dev_err(sess->dev, "Failed to attach dmabuf\n");
 		err = PTR_ERR(map->attach);
 		goto attach_err;
 	}
@@ -997,13 +981,12 @@ static int fastrpc_map_attach_to_dev(struct fastrpc_user *fl, int fd,
 	if (attr & FASTRPC_ATTR_SECUREMAP)
 		map->dma_addr = sg_phys(map->table->sgl);
 	else
-		map->dma_addr = fastrpc_compute_dma_addr(fl, sg_dma_address(map->table->sgl), sess);
+		map->dma_addr = fastrpc_compute_dma_addr(fl, sg_dma_address(map->table->sgl));
 	for_each_sg(map->table->sgl, sgl, map->table->nents,
 		sgl_index)
 		map->size += sg_dma_len(sgl);
-
 	if (len > map->size) {
-		dev_dbg(dev, "Bad size passed len 0x%llx map size 0x%llx\n",
+		dev_dbg(sess->dev, "Bad size passed len 0x%llx map size 0x%llx\n",
 				len, map->size);
 		err = -EINVAL;
 		goto get_err;
@@ -1026,7 +1009,7 @@ static int fastrpc_map_attach_to_dev(struct fastrpc_user *fl, int fd,
 		map->attr = attr;
 		err = qcom_scm_assign_mem(map->dma_addr, (u64)map->len, &src_perms, dst_perms, 2);
 		if (err) {
-			dev_err(dev,
+			dev_err(sess->dev,
 				"Failed to assign memory with dma_addr %pad size 0x%llx err %d\n",
 				&map->dma_addr, map->len, err);
 			goto get_err;
@@ -1049,37 +1032,13 @@ get_err:
 	return err;
 }
 
-static int fastrpc_map_attach(struct fastrpc_user *fl, int fd,
-			      u64 len, u32 attr, u32 flags,
-			      struct fastrpc_map **ppmap, int mflags)
+static int fastrpc_map_create(struct fastrpc_user *fl, int fd,
+			      u64 len, u32 attr, struct fastrpc_map **ppmap)
 {
-	if (IS_EXTENDED_MAP_FLAG(flags)) {
-		int i, err = -ENODEV;
-
-		if (!fl->cctx->ext_cb_count) {
-			dev_err(fl->sctx->dev, "no extended context bank found\n");
-			return -ENODEV;
-		}
-
-		for (i = 0; i < fl->cctx->ext_cb_count; i++) {
-			err = fastrpc_map_attach_to_dev(fl, fd, len, attr,
-							fl->cctx->ext_cb[i], ppmap, mflags);
-			if (err != -ENOMEM)
-				break;
-		}
-		return err;
-	}
-
-	return fastrpc_map_attach_to_dev(fl, fd, len, attr, fl->sctx, ppmap, mflags);
-}
-
-static int fastrpc_map_create(struct fastrpc_user *fl, int fd, u64 len, u32 attr,
-			      u32 flags, struct fastrpc_map **ppmap, bool take_ref, int mflags)
-{
-	if (!fastrpc_map_lookup(fl, fd, ppmap, take_ref))
+	if (!fastrpc_map_lookup(fl, fd, ppmap, true))
 		return 0;
 
-	return fastrpc_map_attach(fl, fd, len, attr, flags, ppmap, mflags);
+	return fastrpc_map_attach(fl, fd, len, attr, ppmap);
 }
 
 /*
@@ -1150,25 +1109,23 @@ static int fastrpc_create_maps(struct fastrpc_invoke_ctx *ctx)
 	int i, err;
 
 	for (i = 0; i < ctx->nscalars; ++i) {
-		bool take_ref = i < ctx->nbufs;
-		int mflags = 0;
 
 		if (ctx->args[i].fd == 0 || ctx->args[i].fd == -1 ||
 		    ctx->args[i].length == 0)
 			continue;
 
-		/* Set the DMA handle mapping flag for DMA handles */
-		if (i >= ctx->nbufs)
-			mflags = FASTRPC_MAP_DMA_HANDLE;
-
-		err = fastrpc_map_create(ctx->fl, ctx->args[i].fd, ctx->args[i].length,
-					 ctx->args[i].attr, 0, &ctx->maps[i], take_ref, mflags);
+		if (i < ctx->nbufs)
+			err = fastrpc_map_create(ctx->fl, ctx->args[i].fd,
+				 ctx->args[i].length, ctx->args[i].attr, &ctx->maps[i]);
+		else
+			err = fastrpc_map_attach(ctx->fl, ctx->args[i].fd,
+				 ctx->args[i].length, ctx->args[i].attr, &ctx->maps[i]);
 		if (err) {
 			dev_err(dev, "Error Creating map %d\n", err);
 			return -EINVAL;
 		}
-	}
 
+	}
 	return 0;
 }
 
@@ -1300,16 +1257,6 @@ static int fastrpc_get_args(u32 kernel, struct fastrpc_invoke_ctx *ctx)
 		list[i].num = ctx->args[i].length ? 1 : 0;
 		list[i].pgidx = i;
 		if (ctx->maps[i]) {
-			/* It is possible that map is created with
-			 * mflags FASTRPC_MAP_DMA_HANDLE and take_ref
-			 * is false. Check if map still exists or is
-			 * being freed as take_ref is false
-			 */
-			if (fastrpc_map_lookup(ctx->fl, ctx->args[i].fd,
-					       &ctx->maps[i], false)) {
-				ctx->maps[i] = NULL;
-				return -EINVAL;
-			}
 			pages[i].addr = ctx->maps[i]->dma_addr;
 			pages[i].size = ctx->maps[i]->size;
 		}
@@ -1359,17 +1306,8 @@ cleanup_fdlist:
 	for (i = 0; i < FASTRPC_MAX_FDLIST; i++) {
 		if (!fdlist[i])
 			break;
-		/*
-		 * DMA handle maps are released when the DSP returns the corresponding fd in
-		 * fdlist. The DSP is expected to return a specific fd only once in fdlist,
-		 * so no two fastrpc_put_args() paths should clear the DMA_HANDLE flag for
-		 * the same map concurrently.
-		 */
-		if (!fastrpc_map_lookup(fl, (int)fdlist[i], &mmap, false) &&
-		    mmap->flags == FASTRPC_MAP_DMA_HANDLE) {
-			mmap->flags = 0;
+		if (!fastrpc_map_lookup(fl, (int)fdlist[i], &mmap, false))
 			fastrpc_map_put(mmap);
-		}
 	}
 
 	return ret;
@@ -1737,7 +1675,7 @@ static int fastrpc_init_create_process(struct fastrpc_user *fl,
 	fl->pd = USER_PD;
 
 	if (init.filelen && init.filefd) {
-		err = fastrpc_map_create(fl, init.filefd, init.filelen, 0, 0, &map, true, 0);
+		err = fastrpc_map_create(fl, init.filefd, init.filelen, 0, &map);
 		if (err)
 			goto err;
 	}
@@ -2344,7 +2282,7 @@ static int fastrpc_req_mem_map(struct fastrpc_user *fl, char __user *argp)
 		return -EFAULT;
 
 	/* create SMMU mapping */
-	err = fastrpc_map_create(fl, req.fd, req.length, 0, req.flags, &map, true, 0);
+	err = fastrpc_map_create(fl, req.fd, req.length, 0, &map);
 	if (err) {
 		dev_err(dev, "failed to map buffer, fd = %d\n", req.fd);
 		return err;
@@ -2675,64 +2613,9 @@ static const struct of_device_id fastrpc_poll_supported_machines[] __maybe_unuse
 	{},
 };
 
-static int fastrpc_remote_heap_map(struct device *rdev,
-				   struct device_node *rproc_node,
-				   phys_addr_t addr, u64 size)
-{
-	struct platform_device *rproc_pdev;
-	struct iommu_domain *domain;
-	int ret;
-
-	rproc_pdev = of_find_device_by_node(rproc_node);
-	if (!rproc_pdev) {
-		dev_err(rdev, "failed to find remoteproc platform device\n");
-		return -ENODEV;
-	}
-
-	domain = iommu_get_domain_for_dev(&rproc_pdev->dev);
-	if (!domain) {
-		put_device(&rproc_pdev->dev);
-		dev_err(rdev, "no IOMMU domain for remoteproc\n");
-		return -ENODEV;
-	}
-
-	ret = iommu_map(domain, addr, addr, size,
-			IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
-	if (ret)
-		dev_err(rdev, "failed to map remote heap phys=%pa size=%#llx err=%d\n",
-			&addr, size, ret);
-
-	put_device(&rproc_pdev->dev);
-	return ret;
-}
-
-static void fastrpc_remote_heap_unmap(struct rpmsg_device *rpdev,
-				      phys_addr_t addr, u64 size)
-{
-	struct device_node *rproc_node;
-	struct platform_device *rproc_pdev;
-	struct iommu_domain *domain;
-
-	rproc_node = of_get_parent(of_get_parent(rpdev->dev.of_node));
-	if (!rproc_node)
-		return;
-
-	rproc_pdev = of_find_device_by_node(rproc_node);
-	of_node_put(rproc_node);
-	if (!rproc_pdev)
-		return;
-
-	domain = iommu_get_domain_for_dev(&rproc_pdev->dev);
-	if (domain)
-		iommu_unmap(domain, addr, size);
-
-	put_device(&rproc_pdev->dev);
-}
-
 static int fastrpc_init_reserved_mem(struct fastrpc_channel_ctx *cctx,
 				     struct device *rdev, u32 domain_id)
 {
-	struct device_node *rproc_node;
 	struct resource res;
 	u64 src_perms;
 	int err;
@@ -2761,25 +2644,7 @@ static int fastrpc_init_reserved_mem(struct fastrpc_channel_ctx *cctx,
 		cctx->remote_heap_size = resource_size(&res);
 	}
 
-	/*
-	 * On KVM-based targets the remoteproc runs in its own IOMMU domain
-	 * and the DSP can only reach memory explicitly mapped into it.
-	 * Detect that case via the "iommus" property on the remoteproc DT
-	 * node and map the carveout with iommu_map() instead of the
-	 * Gunyah-style qcom_scm_assign_mem() hyp-assign.
-	 */
-	rproc_node = of_get_parent(of_get_parent(rdev->of_node));
-	if (rproc_node) {
-		cctx->has_iommu = of_property_present(rproc_node, "iommus");
-		if (cctx->has_iommu)
-			err = fastrpc_remote_heap_map(rdev, rproc_node,
-						      res.start, resource_size(&res));
-		of_node_put(rproc_node);
-		if (err)
-			return err;
-	}
-
-	if (cctx->has_iommu || !cctx->vmcount)
+	if (!cctx->vmcount)
 		return 0;
 
 	src_perms = BIT(QCOM_SCM_VMID_HLOS);
@@ -2942,10 +2807,7 @@ static void fastrpc_rpmsg_remove(struct rpmsg_device *rpdev)
 	if (cctx->secure_fdevice)
 		misc_deregister(&cctx->secure_fdevice->miscdev);
 
-	if (cctx->has_iommu && cctx->remote_heap_size) {
-		fastrpc_remote_heap_unmap(rpdev, cctx->remote_heap_addr,
-					  cctx->remote_heap_size);
-	} else if (cctx->remote_heap_size && cctx->vmcount) {
+	if (cctx->remote_heap_size && cctx->vmcount) {
 		u64 src_perms = 0;
 		int err, i;
 		struct qcom_scm_vmperm dst_perms;
