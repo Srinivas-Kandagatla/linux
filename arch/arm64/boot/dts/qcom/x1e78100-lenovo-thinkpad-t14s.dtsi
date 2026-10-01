@@ -378,97 +378,11 @@
 
 	sound {
 		compatible = "qcom,x1e80100-sndcard";
-		model = "X1E80100-LENOVO-Thinkpad-T14s";
+		model = "SP-X1E80100-LENOVO-Thinkpad-T14s";
 		audio-routing = "SpkrLeft IN", "WSA WSA_SPK1 OUT",
 				"SpkrRight IN", "WSA WSA_SPK2 OUT",
-				"IN1_HPHL", "HPHL_OUT",
-				"IN2_HPHR", "HPHR_OUT",
-				"AMIC2", "MIC BIAS2",
-				"VA DMIC0", "MIC BIAS1",
-				"VA DMIC1", "MIC BIAS1",
-				"VA DMIC0", "VA MIC BIAS1",
-				"VA DMIC1", "VA MIC BIAS1",
-				"TX SWR_INPUT1", "ADC2_OUTPUT";
-
-		displayport-0-dai-link {
-			link-name = "DisplayPort0 Playback";
-
-			codec {
-				sound-dai = <&mdss_dp0>;
-			};
-
-			cpu {
-				sound-dai = <&q6apmbedai DISPLAY_PORT_RX_0>;
-			};
-
-			platform {
-				sound-dai = <&q6apm>;
-			};
-		};
-
-		displayport-1-dai-link {
-			link-name = "DisplayPort1 Playback";
-
-			codec {
-				sound-dai = <&mdss_dp1>;
-			};
-
-			cpu {
-				sound-dai = <&q6apmbedai DISPLAY_PORT_RX_1>;
-			};
-
-			platform {
-				sound-dai = <&q6apm>;
-			};
-		};
-
-		displayport-2-dai-link {
-			link-name = "DisplayPort2 Playback";
-
-			codec {
-				sound-dai = <&mdss_dp2>;
-			};
-
-			cpu {
-				sound-dai = <&q6apmbedai DISPLAY_PORT_RX_2>;
-			};
-
-			platform {
-				sound-dai = <&q6apm>;
-			};
-		};
-
-		wcd-playback-dai-link {
-			link-name = "WCD Playback";
-
-			cpu {
-				sound-dai = <&q6apmbedai RX_CODEC_DMA_RX_0>;
-			};
-
-			codec {
-				sound-dai = <&wcd938x 0>, <&swr1 0>, <&lpass_rxmacro 0>;
-			};
-
-			platform {
-				sound-dai = <&q6apm>;
-			};
-		};
-
-		wcd-capture-dai-link {
-			link-name = "WCD Capture";
-
-			cpu {
-				sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
-			};
-
-			codec {
-				sound-dai = <&wcd938x 1>, <&swr2 1>, <&lpass_txmacro 0>;
-			};
-
-			platform {
-				sound-dai = <&q6apm>;
-			};
-		};
+				"VA DMIC0", "vdd-micb",
+				"VA DMIC1", "vdd-micb";
 
 		wsa-dai-link {
 			link-name = "WSA Playback";
@@ -478,7 +392,26 @@
 			};
 
 			codec {
-				sound-dai = <&left_spkr>, <&right_spkr>, <&swr0 0>, <&lpass_wsamacro 0>;
+				sound-dai = <&left_spkr 0>, <&right_spkr 0>,
+					    <&swr0 0>, <&lpass_wsamacro 0>;
+			};
+
+			platform {
+				sound-dai = <&q6apm>;
+			};
+		};
+
+		vi-feedback-dai-link {
+			link-name = "CODEC_DMA-LPAIF_WSA-TX-0";
+
+			cpu {
+				sound-dai = <&q6apmbedai WSA_CODEC_DMA_TX_0>;
+			};
+
+			codec {
+				sound-dai = <&left_spkr 1>, <&right_spkr 1>,
+					    <&swr0 10>, <&swr0 11>,
+					    <&lpass_wsamacro 2>;
 			};
 
 			platform {
@@ -1340,7 +1273,7 @@
 		compatible = "sdw20217020400";
 		reg = <0 0>;
 		reset-gpios = <&lpass_tlmm 12 GPIO_ACTIVE_LOW>;
-		#sound-dai-cells = <0>;
+		#sound-dai-cells = <1>;
 		sound-name-prefix = "SpkrLeft";
 		vdd-1p8-supply = <&vreg_l15b_1p8>;
 		vdd-io-supply = <&vreg_l12b_1p2>;
@@ -1352,7 +1285,7 @@
 		compatible = "sdw20217020400";
 		reg = <0 1>;
 		reset-gpios = <&lpass_tlmm 12 GPIO_ACTIVE_LOW>;
-		#sound-dai-cells = <0>;
+		#sound-dai-cells = <1>;
 		sound-name-prefix = "SpkrRight";
 		vdd-1p8-supply = <&vreg_l15b_1p8>;
 		vdd-io-supply = <&vreg_l12b_1p2>;
