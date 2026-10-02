@@ -84,7 +84,6 @@ static int x1e80100_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	} else {
 		rate->min = rate->max = 48000;
 		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
-		channels->min = channels->max = 2;
 	}
 
 	switch (cpu_dai->id) {
@@ -134,17 +133,13 @@ static int x1e80100_snd_prepare(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct x1e80100_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
+	unsigned int channels = substream->runtime->channels;
 	unsigned int rx_slot[4];
 	int ret;
 
 	switch (cpu_dai->id) {
 	case WSA_CODEC_DMA_RX_0:
-	case WSA_CODEC_DMA_RX_1: {
-		unsigned int channels;
-
-		if (!substream->runtime)
-			break;
-		channels = substream->runtime->channels;
+	case WSA_CODEC_DMA_RX_1:
 		ret = x1e80100_snd_hw_map_channels(rx_slot, channels);
 		if (ret)
 			return ret;
@@ -154,7 +149,6 @@ static int x1e80100_snd_prepare(struct snd_pcm_substream *substream)
 		if (ret)
 			return ret;
 		break;
-	}
 	default:
 		break;
 	}
