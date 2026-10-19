@@ -762,6 +762,19 @@ struct snd_soc_dai_link {
 	int (*be_hw_params_fixup)(struct snd_soc_pcm_runtime *rtd,
 			struct snd_pcm_hw_params *params);
 
+	/*
+	 * Optional params override applied to codec DAIs whose direction
+	 * is flipped by the multi_direction_codecs path in
+	 * __soc_pcm_hw_params. Called with a per-codec copy of the
+	 * substream params and the flipped stream (SNDRV_PCM_STREAM_*).
+	 * The link uses this when the opposite direction needs a
+	 * different rate/format than the substream's direction (e.g. VI
+	 * capture codec DAIs riding on a 48kHz speaker-playback link
+	 * need their 8kHz/S32_LE format).
+	 */
+	int (*multi_direction_params_fixup)(struct snd_soc_pcm_runtime *rtd,
+			struct snd_pcm_hw_params *params, int stream);
+
 	/* machine stream operations */
 	const struct snd_soc_ops *ops;
 	const struct snd_soc_compr_ops *compr_ops;
@@ -795,6 +808,16 @@ struct snd_soc_dai_link {
 
 	/* This DAI link can route to other DAI links at runtime (Frontend)*/
 	unsigned int dynamic:1;
+
+	/*
+	 * This BE link bundles codec DAIs of both directions on a
+	 * single-direction CPU DAI (e.g. a WSA speaker-protection
+	 * playback link that also carries VI-capture codec DAIs).
+	 * When set, the ASoC core calls .hw_params / set_stream on
+	 * opposite-direction codec DAIs with their own direction
+	 * instead of skipping them.
+	 */
+	unsigned int multi_direction_codecs:1;
 
 	/* DPCM used FE & BE merged format */
 	unsigned int dpcm_merged_format:1;

@@ -1054,9 +1054,23 @@ static int soc_pcm_hw_clean(struct snd_soc_pcm_runtime *rtd,
 	snd_soc_pcm_component_hw_free(substream, rollback);
 
 	/* now free hw params for the DAIs  */
-	for_each_rtd_dais(rtd, i, dai)
-		if (snd_soc_dai_stream_valid(dai, substream->stream))
-			snd_soc_dai_hw_free(dai, substream, rollback);
+	for_each_rtd_dais(rtd, i, dai) {
+		int dai_stream = substream->stream;
+		int saved_stream;
+
+		if (!snd_soc_dai_stream_valid(dai, dai_stream)) {
+			if (!rtd->dai_link->multi_direction_codecs)
+				continue;
+			dai_stream ^= 1;
+			if (!snd_soc_dai_stream_valid(dai, dai_stream))
+				continue;
+		}
+
+		saved_stream = substream->stream;
+		substream->stream = dai_stream;
+		snd_soc_dai_hw_free(dai, substream, rollback);
+		substream->stream = saved_stream;
+	}
 
 	return 0;
 }
@@ -1107,29 +1121,51 @@ static int __soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		goto out;
 
 	for_each_rtd_codec_dais(rtd, i, codec_dai) {
-		unsigned int ch_mask = snd_soc_dai_tdm_mask_get(codec_dai, substream->stream);
+		int codec_stream = substream->stream;
+		int saved_stream;
+		unsigned int ch_mask;
 		struct snd_soc_dai_link_ch_map *ch_maps;
 		int j;
 
 		/*
 		 * Skip CODECs which don't support the current stream type,
-		 * the idea being that if a CODEC is not used for the currently
-		 * set up transfer direction, it should not need to be
-		 * configured, especially since the configuration used might
-		 * not even be supported by that CODEC. There may be cases
-		 * however where a CODEC needs to be set up although it is
-		 * actually not being used for the transfer, e.g. if a
-		 * capture-only CODEC is acting as an LRCLK and/or BCLK master
-		 * for the DAI link including a playback-only CODEC.
-		 * If this becomes necessary, we will have to augment the
-		 * machine driver setup with information on how to act, so
-		 * we can do the right thing here.
+		 * unless the link intentionally bundles opposite-direction
+		 * codec DAIs (multi_direction_codecs). In that case we call
+		 * them with their own direction so that e.g. a VI-capture
+		 * codec DAI attached to a WSA playback BE still has its
+		 * .hw_params / set_stream fire.
 		 */
-		if (!snd_soc_dai_stream_valid(codec_dai, substream->stream))
-			continue;
+		bool direction_flipped = false;
+
+		if (!snd_soc_dai_stream_valid(codec_dai, codec_stream)) {
+			if (!rtd->dai_link->multi_direction_codecs)
+				continue;
+			codec_stream ^= 1;
+			if (!snd_soc_dai_stream_valid(codec_dai, codec_stream))
+				continue;
+			direction_flipped = true;
+		}
+
+		ch_mask = snd_soc_dai_tdm_mask_get(codec_dai, codec_stream);
 
 		/* copy params for each codec */
 		tmp_params = *params;
+
+		/*
+		 * The merged link's substream params describe the primary
+		 * direction. When we flip to a codec DAI's native opposite
+		 * direction, give the link a chance to overwrite tmp_params
+		 * (e.g. VI capture codec DAIs need 8kHz/S32_LE even though
+		 * the WSA playback substream is 48kHz/S16_LE).
+		 */
+		if (direction_flipped && rtd->dai_link->multi_direction_params_fixup) {
+			int fret = rtd->dai_link->multi_direction_params_fixup(
+					rtd, &tmp_params, codec_stream);
+			if (fret < 0) {
+				ret = fret;
+				goto out;
+			}
+		}
 
 		/* fixup params based on TDM or ch_map masks */
 		if (!ch_mask) {
@@ -1141,9 +1177,18 @@ static int __soc_pcm_hw_params(struct snd_pcm_substream *substream,
 		if (ch_mask)
 			soc_pcm_codec_params_fixup(&tmp_params, ch_mask);
 
+		/*
+		 * Briefly flip substream->stream so the codec DAI's
+		 * .hw_params sees its real direction when it differs from
+		 * the substream's (multi_direction_codecs case). The caller
+		 * holds pcm_mutex so nothing else races on this.
+		 */
+		saved_stream = substream->stream;
+		substream->stream = codec_stream;
 		ret = snd_soc_dai_hw_params(codec_dai, substream,
 					    &tmp_params);
-		if(ret < 0)
+		substream->stream = saved_stream;
+		if (ret < 0)
 			goto out;
 
 		snd_soc_dai_symmetric_set_params(codec_dai, &tmp_params);
