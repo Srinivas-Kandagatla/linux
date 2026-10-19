@@ -476,6 +476,7 @@ static void audioreach_populate_graph(struct q6apm *apm,
 	struct apm_container_params *c_data = open->cont_data;
 	struct apm_sub_graph_params *sg_data = open->sg_data;
 	int ncontainer = 0, nmodule = 0, nconn = 0, nlink = 0;
+
 	struct apm_mod_prop_obj *module_prop_obj;
 	struct audioreach_container *container;
 	struct audioreach_control_link *clink;
@@ -1731,6 +1732,7 @@ static int audioreach_speaker_protection_vi(struct q6apm_graph *graph,
 	u32 num_speakers;
 	void *p;
 
+
 	if (num_channels > MAX_SP_VI_SPEAKERS) {
 		dev_err(graph->dev, "Error: Invalid channels (%d)!\n", num_channels);
 		return -EINVAL;
@@ -1999,7 +2001,27 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 				const struct audioreach_module *module,
 				const struct audioreach_module_config *cfg)
 {
+	struct audioreach_module_config sg_cfg;
 	int rc;
+
+	/*
+	 * If this module's subgraph was tagged with its own static format
+	 * (AR_TKN_U32_SUB_GRAPH_SAMPLE_RATE/BIT_WIDTH/NUM_CHANNELS), use that
+	 * in place of the opening DAI's cfg. Needed when a subgraph is
+	 * co-opened via DAI_INDEX sharing and the caller's cfg is for the
+	 * other direction's CODEC_DMA port.
+	 */
+	if (module->container && module->container->sub_graph &&
+	    module->container->sub_graph->has_static_cfg) {
+		struct audioreach_sub_graph *sg = module->container->sub_graph;
+
+		sg_cfg = *cfg;
+		sg_cfg.sample_rate = sg->static_sample_rate;
+		sg_cfg.bit_width = sg->static_bit_width;
+		sg_cfg.bits_per_sample = sg->static_bit_width;
+		sg_cfg.num_channels = sg->static_num_channels;
+		cfg = &sg_cfg;
+	}
 
 	switch (module->module_id) {
 	case MODULE_ID_DATA_LOGGING:

@@ -235,6 +235,17 @@ enum ar_event_types {
 #define AR_TKN_U32_SUB_GRAPH_PERF_MODE		3
 #define AR_TKN_U32_SUB_GRAPH_DIRECTION		4
 #define AR_TKN_U32_SUB_GRAPH_SCENARIO_ID	5
+/*
+ * Optional per-subgraph static media format. Used when a subgraph
+ * needs its own sample_rate / bit_width / num_channels but no CPU DAI
+ * runs hw_params for it (e.g. a VI capture subgraph co-opened via
+ * DAI_INDEX sharing from a playback BE DAI). The driver prefers these
+ * over the opening DAI's cfg when programming CODEC_DMA / SP_VI
+ * modules inside this subgraph.
+ */
+#define AR_TKN_U32_SUB_GRAPH_SAMPLE_RATE	6
+#define AR_TKN_U32_SUB_GRAPH_BIT_WIDTH		7
+#define AR_TKN_U32_SUB_GRAPH_NUM_CHANNELS	8
 
 /* Control Link Tokens */
 #define AR_TKN_U32_CONTROL_LINK_IID		50

@@ -534,6 +534,18 @@ static struct audioreach_sub_graph *audioreach_parse_sg_tokens(struct q6apm *apm
 		case AR_TKN_U32_SUB_GRAPH_SCENARIO_ID:
 			sg->scenario_id = le32_to_cpu(sg_elem->value);
 			break;
+		case AR_TKN_U32_SUB_GRAPH_SAMPLE_RATE:
+			sg->static_sample_rate = le32_to_cpu(sg_elem->value);
+			sg->has_static_cfg = true;
+			break;
+		case AR_TKN_U32_SUB_GRAPH_BIT_WIDTH:
+			sg->static_bit_width = le32_to_cpu(sg_elem->value);
+			sg->has_static_cfg = true;
+			break;
+		case AR_TKN_U32_SUB_GRAPH_NUM_CHANNELS:
+			sg->static_num_channels = le32_to_cpu(sg_elem->value);
+			sg->has_static_cfg = true;
+			break;
 		default:
 			dev_err(apm->dev, "Not a valid token %d for graph\n", sg_elem->token);
 			break;
