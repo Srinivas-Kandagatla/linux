@@ -155,6 +155,50 @@ static int x1e80100_snd_hw_map_channels(unsigned int *ch_map, int num)
 	return 0;
 }
 
+/*
+ * Light up the WSA macro's VI-feedback DAPM path for both WSA buses so
+ * the LPASS WSA SPKR_PROT TX registers get programmed (via the WSA
+ * macro's "WSA AIF_VI" AIF_OUT widget POST_PMU handler). The merged
+ * RX_0 BE link brings up the WSA codec VI DAIs but never activates a
+ * capture substream, so the AIF widget would otherwise stay off and
+ * no VI samples would reach the DSP's SP_VI module.
+ */
+static int x1e80100_wsa_vi_dapm_power(struct snd_soc_pcm_runtime *rtd, bool enable)
+{
+	struct snd_soc_dai *codec_dai;
+	int i, ret;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		struct snd_soc_component *component = codec_dai->component;
+		struct snd_soc_dapm_context *dapm;
+		char pin[64];
+
+		if (strcmp(codec_dai->name, "wsa_macro_vifeedback"))
+			continue;
+
+		dapm = snd_soc_component_to_dapm(component);
+		if (!dapm)
+			continue;
+
+		if (component->name_prefix)
+			snprintf(pin, sizeof(pin), "%s WSA AIF_VI",
+				 component->name_prefix);
+		else
+			snprintf(pin, sizeof(pin), "WSA AIF_VI");
+
+		if (enable)
+			ret = snd_soc_dapm_force_enable_pin(dapm, pin);
+		else
+			ret = snd_soc_dapm_disable_pin(dapm, pin);
+		if (ret)
+			continue;
+
+		snd_soc_dapm_sync(dapm);
+	}
+
+	return 0;
+}
+
 static int x1e80100_snd_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
@@ -180,7 +224,15 @@ static int x1e80100_snd_prepare(struct snd_pcm_substream *substream)
 		break;
 	}
 
-	return qcom_snd_sdw_prepare(substream, &data->stream_prepared[cpu_dai->id]);
+	ret = qcom_snd_sdw_prepare(substream, &data->stream_prepared[cpu_dai->id]);
+	if (ret)
+		return ret;
+
+	if (cpu_dai->id == WSA_CODEC_DMA_RX_0 &&
+	    substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		x1e80100_wsa_vi_dapm_power(rtd, true);
+
+	return 0;
 }
 
 static int x1e80100_snd_hw_free(struct snd_pcm_substream *substream)
@@ -188,6 +240,10 @@ static int x1e80100_snd_hw_free(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct x1e80100_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+
+	if (cpu_dai->id == WSA_CODEC_DMA_RX_0 &&
+	    substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		x1e80100_wsa_vi_dapm_power(rtd, false);
 
 	return qcom_snd_sdw_hw_free(substream, &data->stream_prepared[cpu_dai->id]);
 }
