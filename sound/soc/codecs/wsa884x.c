@@ -23,6 +23,7 @@
 #include <linux/soundwire/sdw_type.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
+#include <linux/thermal.h>
 #include <sound/soc-dapm.h>
 #include <sound/soc.h>
 #include <sound/tlv.h>
@@ -2047,6 +2048,41 @@ static const struct hwmon_chip_info wsa884x_hwmon_chip_info = {
 	.info	= wsa884x_hwmon_info,
 };
 
+static int wsa884x_tz_get_temp(struct thermal_zone_device *tz, int *temp_mdeg)
+{
+	struct wsa884x_priv *wsa884x = thermal_zone_device_priv(tz);
+	long mdeg;
+	int ret;
+
+	/*
+	 * The thermal core immediately calls .get_temp after
+	 * thermal_zone_device_enable(), which can race the SoundWire
+	 * attach: before wsa884x_update_status() syncs the regmap out of
+	 * cache-only, the OTP trim reads return zero and
+	 * wsa884x_get_temp() reports -EINVAL ("d1 == d2 ? Incorrect data
+	 * in OTP"). Report -EAGAIN until the codec is initialised; the
+	 * thermal core treats -EAGAIN quietly, and later reads succeed.
+	 */
+	if (!wsa884x->hw_init)
+		return -EAGAIN;
+
+	ret = wsa884x_get_temp(wsa884x, &mdeg);
+	if (ret)
+		return ret;
+
+	*temp_mdeg = (int)mdeg;
+	return 0;
+}
+
+static const struct thermal_zone_device_ops wsa884x_tz_ops = {
+	.get_temp = wsa884x_tz_get_temp,
+};
+
+static void wsa884x_tz_unregister(void *data)
+{
+	thermal_zone_device_unregister(data);
+}
+
 static void wsa884x_reset_powerdown(void *data)
 {
 	struct wsa884x_priv *wsa884x = data;
@@ -2180,6 +2216,47 @@ static int wsa884x_probe(struct sdw_slave *pdev,
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
+
+	if (IS_REACHABLE(CONFIG_THERMAL)) {
+		char tz_name[THERMAL_NAME_LENGTH];
+		struct thermal_zone_device *tz;
+
+		/*
+		 * Expose die temperature as a thermal zone so an in-kernel
+		 * consumer (speaker-protection calibration on the DSP side)
+		 * can read T0 without any wsa884x-specific symbol export.
+		 * The SoundWire slave's dev_name() is too long for a thermal
+		 * zone (THERMAL_NAME_LENGTH is 20); use the bus id and the
+		 * slave's DisCo-defined unique_id so the consumer can derive
+		 * the exact same string from the codec's component dev.
+		 *
+		 * Register after pm_runtime_enable() because
+		 * thermal_zone_device_enable() immediately schedules a
+		 * .get_temp read, and wsa884x_get_temp() calls
+		 * pm_runtime_resume_and_get() -- without runtime pm enabled
+		 * on this device the thermal core logs a spurious
+		 * "Temperature check failed (-EACCES)" at probe.
+		 */
+		scnprintf(tz_name, sizeof(tz_name), "wsa-%d-%u",
+			  pdev->bus->id, pdev->id.unique_id);
+		tz = thermal_tripless_zone_device_register(tz_name,
+							   wsa884x,
+							   &wsa884x_tz_ops,
+							   NULL);
+		if (IS_ERR(tz)) {
+			dev_warn(dev,
+				 "thermal zone '%s' registration failed (%ld); SP T0 kcontrol will read 0 for this codec\n",
+				 tz_name, PTR_ERR(tz));
+		} else {
+			ret = devm_add_action_or_reset(dev,
+						       wsa884x_tz_unregister,
+						       tz);
+			if (ret)
+				return ret;
+
+			thermal_zone_device_enable(tz);
+		}
+	}
 
 	return devm_snd_soc_register_component(dev,
 					       &wsa884x_component_drv,

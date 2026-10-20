@@ -5,6 +5,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/soc/qcom/apr.h>
+#include <linux/thermal.h>
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
 #include <sound/pcm.h>
@@ -40,6 +41,21 @@ struct sp_vi_r0t0_cfg {
 
 static struct sp_vi_r0t0_cfg sp_vi_r0t0_cfg;
 static DEFINE_MUTEX(sp_vi_r0t0_cfg_lock);
+
+/*
+ * Per-speaker thermal zone table populated by the machine driver at BE-link
+ * init so the "Speaker Protection T0" kcontrol can sample each speaker's
+ * die temperature on demand. The machine driver is responsible for looking
+ * up each codec's thermal zone (by its dev_name()) and passing them in VI
+ * channel order; audioreach stores the pointers and reads them via the
+ * standard thermal_zone_get_temp() API, so the codec driver itself needs
+ * no custom readback export.
+ */
+static struct {
+	struct thermal_zone_device	*tz[MAX_SP_VI_SPEAKERS];
+	unsigned int			 num;
+} sp_speaker_map;
+static DEFINE_MUTEX(sp_speaker_map_lock);
 
 /* SubGraph Config */
 struct apm_sub_graph_data {
@@ -1593,6 +1609,56 @@ void audioreach_get_sp_vi_r0t0(long *vals, unsigned int count)
 		vals[2 * i] = sp_vi_r0.r0_cali_q24[i];
 }
 EXPORT_SYMBOL_GPL(audioreach_get_sp_vi_r0t0);
+
+int audioreach_sp_register_speaker_map(struct thermal_zone_device * const *tzs,
+				       unsigned int num)
+{
+	unsigned int i;
+
+	if (num > MAX_SP_VI_SPEAKERS)
+		return -EINVAL;
+
+	guard(mutex)(&sp_speaker_map_lock);
+
+	for (i = 0; i < num; i++)
+		sp_speaker_map.tz[i] = tzs[i];
+	for (; i < MAX_SP_VI_SPEAKERS; i++)
+		sp_speaker_map.tz[i] = NULL;
+	sp_speaker_map.num = num;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(audioreach_sp_register_speaker_map);
+
+/*
+ * Read die temperature (Q6, degC * 64) from each registered speaker's
+ * thermal zone. Slots whose underlying zone read fails -- codec idle,
+ * trim values not yet ready, EAGAIN -- are reported as 0; a zero T0 is
+ * not a plausible measurement so userspace can treat it as "no sample
+ * this time" and retry.
+ */
+int audioreach_get_sp_vi_t0(long *vals, unsigned int count)
+{
+	unsigned int i, n;
+
+	guard(mutex)(&sp_speaker_map_lock);
+
+	n = min(count, sp_speaker_map.num);
+	for (i = 0; i < n; i++) {
+		int mdeg;
+
+		if (sp_speaker_map.tz[i] &&
+		    !thermal_zone_get_temp(sp_speaker_map.tz[i], &mdeg))
+			vals[i] = ((s64)mdeg * 64) / 1000;
+		else
+			vals[i] = 0;
+	}
+	for (; i < count; i++)
+		vals[i] = 0;
+
+	return n;
+}
+EXPORT_SYMBOL_GPL(audioreach_get_sp_vi_t0);
 
 int audioreach_set_sp_vi_r0t0(struct device *dev, const long *vals, unsigned int count)
 {
