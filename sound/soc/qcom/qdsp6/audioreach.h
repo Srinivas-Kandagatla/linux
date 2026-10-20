@@ -998,19 +998,6 @@ struct audioreach_sub_graph {
 	struct list_head container_list;
 	uint32_t num_control_links;
 	struct list_head control_link_list;
-
-	/*
-	 * Optional static media format from
-	 * AR_TKN_U32_SUB_GRAPH_SAMPLE_RATE/BIT_WIDTH/NUM_CHANNELS.
-	 * If has_static_cfg is set, audioreach_set_media_format uses
-	 * these in place of the opening DAI's cfg so a subgraph
-	 * co-opened via DAI_INDEX sharing can still program its own
-	 * CODEC_DMA / SP_VI format.
-	 */
-	bool has_static_cfg;
-	uint32_t static_sample_rate;
-	uint16_t static_bit_width;
-	uint16_t static_num_channels;
 };
 
 struct audioreach_container {

@@ -2036,30 +2036,47 @@ static int audioreach_speaker_protection_vi_static_cfg(struct q6apm_graph *graph
 	return audioreach_speaker_protection_send_static_cfg(graph, module, "VI");
 }
 
+static bool audioreach_sg_contains_sp_vi(const struct audioreach_sub_graph *sg)
+{
+	const struct audioreach_container *c;
+	const struct audioreach_module *m;
+
+	if (!sg)
+		return false;
+
+	list_for_each_entry(c, &sg->container_list, node)
+		list_for_each_entry(m, &c->modules_list, node)
+			if (m->module_id == MODULE_ID_SPEAKER_PROTECTION_VI)
+				return true;
+
+	return false;
+}
+
 int audioreach_set_media_format(struct q6apm_graph *graph,
 				const struct audioreach_module *module,
 				const struct audioreach_module_config *cfg)
 {
-	struct audioreach_module_config sg_cfg;
+	struct audioreach_module_config sp_vi_cfg;
 	int rc;
 
 	/*
-	 * If this module's subgraph was tagged with its own static format
-	 * (AR_TKN_U32_SUB_GRAPH_SAMPLE_RATE/BIT_WIDTH/NUM_CHANNELS), use that
-	 * in place of the opening DAI's cfg. Needed when a subgraph is
-	 * co-opened via DAI_INDEX sharing and the caller's cfg is for the
-	 * other direction's CODEC_DMA port.
+	 * SPEAKER_PROTECTION_VI (and the CODEC_DMA_SOURCE in its subgraph)
+	 * runs on a fixed 8 kHz / S32_LE wire format that is a DSP-side
+	 * invariant for the calibration pipeline. The opener's cfg comes
+	 * from the playback-direction CPU DAI's hw_params and would land
+	 * on these modules unchanged in a merged (multi_direction_codecs)
+	 * BE link; pin rate+format here. Channel count tracks the opener's
+	 * stream (= speaker count on the WSA buses).
 	 */
-	if (module->container && module->container->sub_graph &&
-	    module->container->sub_graph->has_static_cfg) {
-		struct audioreach_sub_graph *sg = module->container->sub_graph;
-
-		sg_cfg = *cfg;
-		sg_cfg.sample_rate = sg->static_sample_rate;
-		sg_cfg.bit_width = sg->static_bit_width;
-		sg_cfg.bits_per_sample = sg->static_bit_width;
-		sg_cfg.num_channels = sg->static_num_channels;
-		cfg = &sg_cfg;
+	if (module->module_id == MODULE_ID_SPEAKER_PROTECTION_VI ||
+	    (module->module_id == MODULE_ID_CODEC_DMA_SOURCE &&
+	     audioreach_sg_contains_sp_vi(module->container ?
+					  module->container->sub_graph : NULL))) {
+		sp_vi_cfg = *cfg;
+		sp_vi_cfg.sample_rate = 8000;
+		sp_vi_cfg.bit_width = 32;
+		sp_vi_cfg.bits_per_sample = 32;
+		cfg = &sp_vi_cfg;
 	}
 
 	switch (module->module_id) {
