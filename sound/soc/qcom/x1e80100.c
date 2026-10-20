@@ -69,6 +69,33 @@ static int x1e80100_snd_init(struct snd_soc_pcm_runtime *rtd)
 	return qcom_snd_wcd_jack_setup(rtd, &data->jack, &data->jack_setup);
 }
 
+/*
+ * Rewrite codec DAI params when the WSA merged BE link's playback-side
+ * substream is reused for VI capture codec DAIs via multi_direction_codecs.
+ * The VI capture chain (WSA codec VI, swr0 Pin12/13, wsa_macro_vifeedback)
+ * runs at 8kHz/S32_LE/4ch regardless of what the RX side runs at.
+ */
+static int x1e80100_wsa_vi_params_fixup(struct snd_soc_pcm_runtime *rtd,
+					struct snd_pcm_hw_params *params,
+					int stream)
+{
+	struct snd_interval *rate =
+		hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_interval *channels =
+		hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
+	struct snd_mask *fmt =
+		hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+
+	if (stream != SNDRV_PCM_STREAM_CAPTURE)
+		return 0;
+
+	rate->min = rate->max = 8000;
+	channels->min = channels->max = 4;
+	snd_mask_none(fmt);
+	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S32_LE);
+	return 0;
+}
+
 static int x1e80100_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 				     struct snd_pcm_hw_params *params)
 {
@@ -182,6 +209,20 @@ static void x1e80100_add_be_ops(struct snd_soc_card *card)
 			link->init = x1e80100_snd_init;
 			link->be_hw_params_fixup = x1e80100_be_hw_params_fixup;
 			link->ops = &x1e80100_be_ops;
+		}
+
+		/*
+		 * The WSA speaker-protection playback link bundles both the
+		 * SPKR playback-side codec DAIs and the VI capture-side
+		 * codec DAIs (VI, swr0 Pin12/13, wsa_macro_vifeedback) so a
+		 * single MM1 playback open brings up both chains. The
+		 * SP<->SP_VI control-link in the tplg handles the DSP-side
+		 * pairing.
+		 */
+		if (link->id == WSA_CODEC_DMA_RX_0) {
+			link->multi_direction_codecs = 1;
+			link->multi_direction_params_fixup =
+				x1e80100_wsa_vi_params_fixup;
 		}
 	}
 }
