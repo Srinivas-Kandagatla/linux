@@ -505,6 +505,36 @@ static void audioreach_populate_graph(struct q6apm *apm,
 		apm_populate_sub_graph_config(sg_cfg, sg);
 
 		list_for_each_entry(clink, &sg->control_link_list, node) {
+			bool dup = false;
+			int k;
+
+			/*
+			 * The tplg typically declares the same control link
+			 * on both participating subgraphs (once anchored on
+			 * each peer). When those two subgraphs land in the
+			 * same GRAPH_OPEN -- as they do once DAI_INDEX
+			 * sharing folds them into one graph_info -- the DSP
+			 * rejects the duplicate (APM_CMD_GRAPH_OPEN error 2)
+			 * because it already has a control-link registration
+			 * for that peer pair. Skip the second copy here;
+			 * (peer1, peer2) is order-sensitive on the DSP so we
+			 * dedupe on both orientations.
+			 */
+			for (k = 0; k < nlink; k++) {
+				struct apm_control_link_obj *o = &cl_data->link_obj[k];
+
+				if ((o->peer1_mod_inst_id == clink->peer1_mod_inst_id &&
+				     o->peer2_mod_inst_id == clink->peer2_mod_inst_id) ||
+				    (o->peer1_mod_inst_id == clink->peer2_mod_inst_id &&
+				     o->peer2_mod_inst_id == clink->peer1_mod_inst_id)) {
+					dup = true;
+					break;
+				}
+			}
+			if (dup) {
+				continue;
+			}
+
 			clink_obj = &cl_data->link_obj[nlink++];
 			clink_obj->peer1_mod_inst_id = clink->peer1_mod_inst_id;
 			clink_obj->peer1_mod_port_id = clink->peer1_mod_port_id;
@@ -562,6 +592,15 @@ static void audioreach_populate_graph(struct q6apm *apm,
 			ncontainer++;
 		}
 	}
+
+	/*
+	 * Overwrite num_ctrl_link_cfg with the actual number of unique
+	 * control-link entries packed. The pre-pass caller computed it as
+	 * sum(sg->num_control_links) across subgraphs; when the same ctrl
+	 * link is anchored on both peer subgraphs (common tplg pattern) the
+	 * dedupe above shrinks the real count.
+	 */
+	cl_data->num_ctrl_link_cfg = nlink;
 }
 
 void *audioreach_alloc_graph_pkt(struct q6apm *apm,
